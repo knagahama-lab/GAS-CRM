@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GAS CRM 管理画面</title>
+<style>
+:root { --primary:#1A56DB; --dark:#1F2937; --gray:#6B7280; --light:#F3F4F6; --border:#E5E7EB; --green:#0E9F6E; --red:#E02424; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #F9FAFB; color: var(--dark); font-size: 14px; }
+.header { background: var(--dark); color: white; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
+.header h1 { font-size: 18px; }
+.back-btn { color: #9CA3AF; text-decoration: none; font-size: 13px; }
+.container { max-width: 1000px; margin: 24px auto; padding: 0 24px; }
+.tabs { display: flex; border-bottom: 2px solid var(--border); margin-bottom: 24px; gap: 2px; }
+.tab { padding: 10px 20px; cursor: pointer; color: var(--gray); border-bottom: 2px solid transparent; font-weight: 500; margin-bottom: -2px; }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+.panel { display: none; }
+.panel.active { display: block; }
+.card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 20px; margin-bottom: 16px; }
+.card h3 { font-size: 15px; margin-bottom: 16px; color: var(--dark); }
+.feature-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.feature-item { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: var(--light); border-radius: 8px; }
+.feature-name { font-weight: 500; font-size: 14px; }
+.feature-desc { font-size: 12px; color: var(--gray); margin-top: 2px; }
+.toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
+.toggle input { opacity: 0; width: 0; height: 0; }
+.slider { position: absolute; inset: 0; background: #D1D5DB; border-radius: 24px; cursor: pointer; transition: .2s; }
+.slider:before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .2s; }
+input:checked + .slider { background: var(--primary); }
+input:checked + .slider:before { transform: translateX(20px); }
+.form-group { margin-bottom: 14px; }
+.form-label { display: block; font-size: 13px; font-weight: 500; color: var(--dark); margin-bottom: 6px; }
+.form-control { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
+.form-control:focus { outline: none; border-color: var(--primary); }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; }
+.btn-primary { background: var(--primary); color: white; }
+.btn-danger { background: #FEF2F2; color: var(--red); border: 1px solid #FECACA; }
+.btn-green { background: #F0FDF4; color: var(--green); border: 1px solid #BBF7D0; }
+table { width: 100%; border-collapse: collapse; }
+th { background: #F8FAFC; padding: 10px 14px; text-align: left; font-size: 12px; color: var(--gray); border-bottom: 1px solid var(--border); }
+td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+.badge-admin { background: #FEF3C7; color: #92400E; }
+.badge-manager { background: #DBEAFE; color: #1E40AF; }
+.badge-sales { background: #D1FAE5; color: #065F46; }
+#toast { position: fixed; top: 20px; right: 20px; padding: 12px 18px; border-radius: 8px; color: white; font-size: 14px; z-index: 999; display: none; }
+.toast-success { background: var(--green); }
+.toast-error { background: var(--red); }
+.section-divider { font-size: 12px; color: var(--gray); text-transform: uppercase; letter-spacing: 0.05em; margin: 20px 0 10px; font-weight: 600; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>⚙️ GAS CRM 管理画面</h1>
+  <a href="#" class="back-btn" onclick="goMain(event)">← メイン画面に戻る</a>
+</div>
+
+<div class="container">
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('features')">🔧 機能設定</div>
+    <div class="tab" onclick="switchTab('users')">👥 ユーザー管理</div>
+    <div class="tab" onclick="switchTab('report')">📊 レポート設定</div>
+    <div class="tab" onclick="switchTab('system')">🖥️ システム</div>
+  </div>
+
+  <!-- 機能設定 -->
+  <div class="panel active" id="panel-features">
+    <div class="card">
+      <h3>🔧 機能のON/OFF設定</h3>
+      <p style="font-size:13px;color:#6B7280;margin-bottom:16px">設定変更はすぐに反映されます。</p>
+      <div class="section-divider">コア機能</div>
+      <div class="feature-grid" id="features-core"></div>
+      <div class="section-divider" style="margin-top:20px">Gmail・カレンダー連携</div>
+      <div class="feature-grid" id="features-integration"></div>
+      <div class="section-divider" style="margin-top:20px">レポート・分析</div>
+      <div class="feature-grid" id="features-report"></div>
+      <div class="section-divider" style="margin-top:20px">高度機能</div>
+      <div class="feature-grid" id="features-advanced"></div>
+    </div>
+  </div>
+
+  <!-- ユーザー管理 -->
+  <div class="panel" id="panel-users">
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+        <h3 style="margin:0">👥 ユーザー一覧</h3>
+        <button class="btn btn-primary" onclick="showAddUser()">＋ ユーザー追加</button>
+      </div>
+      <table>
+        <thead><tr><th>名前</th><th>メール</th><th>ロール</th><th>エリア</th><th>状態</th><th>操作</th></tr></thead>
+        <tbody id="users-tbody"><tr><td colspan="6" style="text-align:center;padding:30px;color:#9CA3AF">読み込み中...</td></tr></tbody>
+      </table>
+    </div>
+    <div class="card" id="user-form-card" style="display:none">
+      <h3>👤 ユーザー追加</h3>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group"><label class="form-label">名前</label><input class="form-control" id="u-name" placeholder="山田 太郎"></div>
+        <div class="form-group"><label class="form-label">メールアドレス</label><input class="form-control" id="u-email" type="email" placeholder="yamada@company.com"></div>
+        <div class="form-group"><label class="form-label">ロール</label>
+          <select class="form-control" id="u-role">
+            <option value="SALES">営業担当者</option>
+            <option value="MANAGER">マネージャー</option>
+            <option value="ADMIN">管理者</option>
+            <option value="VIEWER">閲覧者</option>
+          </select>
+        </div>
+        <div class="form-group"><label class="form-label">担当エリア</label><input class="form-control" id="u-area" placeholder="東京・関東など"></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-primary" onclick="addUser()">追加</button>
+        <button class="btn" style="background:var(--light)" onclick="hideUserForm()">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- レポート設定 -->
+  <div class="panel" id="panel-report">
+    <div class="card">
+      <h3>📊 レポート設定</h3>
+      <div class="form-group">
+        <label class="form-label">レポート送信先（カンマ区切り）</label>
+        <input class="form-control" id="s-recipients" placeholder="manager@company.com, ceo@company.com">
+      </div>
+      <div class="form-group">
+        <label class="form-label">送信頻度</label>
+        <select class="form-control" id="s-schedule">
+          <option value="DAILY">毎日</option>
+          <option value="WEEKLY" selected>毎週月曜日</option>
+          <option value="MONTHLY">毎月1日</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">リマインダー通知（クローズ予定日の何日前）</label>
+        <input class="form-control" id="s-reminder" type="number" value="3" min="1" max="30">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Gmailスキャン間隔（分）</label>
+        <input class="form-control" id="s-email-interval" type="number" value="15" min="5" max="60">
+      </div>
+      <button class="btn btn-primary" onclick="saveReportSettings()">💾 保存</button>
+    </div>
+  </div>
+
+  <!-- システム -->
+  <div class="panel" id="panel-system">
+    <div class="card">
+      <h3>🖥️ システム状態</h3>
+      <div id="system-status" style="color:#6B7280;padding:20px 0">読み込み中...</div>
+    </div>
+    <div class="card">
+      <h3>⚙️ セットアップ・メンテナンス</h3>
+      <div style="display:flex;flex-direction:column;gap:12px">
+        <div>
+          <p style="font-size:13px;color:#6B7280;margin-bottom:8px">トリガーを再設定します（設定変更後に実行）。</p>
+          <button class="btn btn-green" onclick="resetTriggers()">🔄 トリガー再設定</button>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--border)">
+        <div>
+          <p style="font-size:13px;color:#6B7280;margin-bottom:8px">テストレポートを今すぐ送信します。</p>
+          <button class="btn" style="background:#EFF6FF;color:var(--primary);border:1px solid #BFDBFE" onclick="testReport()">📧 テストレポート送信</button>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--border)">
+        <div>
+          <p style="font-size:13px;color:#6B7280;margin-bottom:8px">今すぐGmailスキャンを実行します。</p>
+          <button class="btn" style="background:#F0FDF4;color:var(--green);border:1px solid #BBF7D0" onclick="runEmailScan()">📬 メールスキャン実行</button>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--border)">
+        <div>
+          <p style="font-size:13px;color:#EF4444;margin-bottom:8px">⚠️ 全シートを再作成します（データは消えません）。</p>
+          <button class="btn btn-danger" onclick="if(confirm('トリガーを再設定してよいですか？'))resetTriggers()">⚠️ 全トリガー削除・再設定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const FEATURE_DEFS = {
+  core: [
+    { key:'FEATURE_CUSTOMERS',  name:'顧客管理',    desc:'顧客情報の登録・編集・検索' },
+    { key:'FEATURE_DEALS',      name:'商談管理',    desc:'商談パイプライン管理' },
+    { key:'FEATURE_ACTIVITIES', name:'活動ログ',    desc:'営業活動の記録・管理' },
+    { key:'FEATURE_CONTACTS',   name:'担当者管理',  desc:'顧客担当者の連絡先管理' },
+  ],
+  integration: [
+    { key:'FEATURE_EMAIL_TRACKING',name:'Gmail自動追跡',  desc:'最終コンタクト日を自動更新' },
+    { key:'FEATURE_EMAIL_SEND',    name:'メール送信',      desc:'CRMからメール送信' },
+    { key:'FEATURE_CAL_CREATE',    name:'カレンダー自動登録',desc:'商談をカレンダーへ自動追加' },
+    { key:'FEATURE_CAL_REMINDER',  name:'リマインダー通知',desc:'クローズ予定日の前日通知' },
+  ],
+  report: [
+    { key:'FEATURE_DASHBOARD',   name:'KPIダッシュボード', desc:'リアルタイムKPI集計' },
+    { key:'FEATURE_PIPELINE',    name:'パイプライン分析',  desc:'フェーズ別商談可視化' },
+    { key:'FEATURE_REPORT_AUTO', name:'定期レポート',      desc:'週次・月次メール送信' },
+    { key:'FEATURE_TARGETS',     name:'目標管理',          desc:'個人・チーム目標追跡' },
+  ],
+  advanced: [
+    { key:'FEATURE_KANBAN',  name:'カンバンボード',  desc:'フェーズ別商談のビジュアル管理' },
+    { key:'FEATURE_SEARCH',  name:'グローバル検索',  desc:'顧客・商談・活動を横断検索' },
+    { key:'FEATURE_DEDUP',   name:'重複チェック',    desc:'顧客登録時の重複自動検出' },
+  ],
+};
+
+let settings = {};
+let users = [];
+
+// ── 初期化 ──
+window.onload = async () => {
+  await loadSettings();
+  await loadUsers();
+  renderFeatures();
+  renderUsers();
+  renderSystemStatus();
+};
+
+async function loadSettings() {
+  return new Promise((resolve) => {
+    google.script.run.withSuccessHandler(res => {
+      const parsed = typeof res === 'string' ? JSON.parse(res) : res;
+      if (parsed.success) settings = parsed.data;
+      resolve();
+    }).withFailureHandler(() => resolve()).serverAction('getAllSettings', {});
+  });
+}
+
+async function loadUsers() {
+  return new Promise((resolve) => {
+    google.script.run.withSuccessHandler(res => {
+      const parsed = typeof res === 'string' ? JSON.parse(res) : res;
+      if (parsed.success) users = parsed.data;
+      resolve();
+    }).withFailureHandler(() => resolve()).serverAction('getAllUsers', {});
+  });
+}
+
+// ── 機能設定 ──
+function renderFeatures() {
+  Object.entries(FEATURE_DEFS).forEach(([group, features]) => {
+    const container = document.getElementById(`features-${group}`);
+    if (!container) return;
+    container.innerHTML = features.map(f => {
+      const checked = settings[f.key] === undefined || String(settings[f.key]).toUpperCase() === 'TRUE';
+      return `<div class="feature-item">
+        <div>
+          <div class="feature-name">${f.name}</div>
+          <div class="feature-desc">${f.desc}</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" ${checked ? 'checked' : ''} onchange="toggleFeature('${f.key}', this.checked)">
+          <span class="slider"></span>
+        </label>
+      </div>`;
+    }).join('');
+  });
+}
+
+function toggleFeature(key, value) {
+  google.script.run
+    .withSuccessHandler(() => showToast(`「${key}」を ${value ? 'ON' : 'OFF'} にしました`, 'success'))
+    .withFailureHandler(e => showToast(e.message, 'error'))
+    .serverAction('setFeature', { key, value: String(value).toUpperCase() });
+}
+
+// ── ユーザー管理 ──
+function renderUsers() {
+  const tbody = document.getElementById('users-tbody');
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:30px;color:#9CA3AF">ユーザーなし</td></tr>'; return; }
+  const roleClass = { ADMIN:'badge-admin', MANAGER:'badge-manager', SALES:'badge-sales', VIEWER:'' };
+  tbody.innerHTML = users.map(u => `
+    <tr>
+      <td><strong>${esc(u.name)}</strong></td>
+      <td>${esc(u.email)}</td>
+      <td><span class="badge ${roleClass[u.role]||''}">${u.role}</span></td>
+      <td>${esc(u.area||'—')}</td>
+      <td><span style="color:${u.active==='TRUE'?'var(--green)':'var(--gray)'}">${u.active==='TRUE'?'●有効':'○無効'}</span></td>
+      <td>
+        <button class="btn" style="padding:4px 10px;font-size:12px;background:#FEF2F2;color:var(--red);border:1px solid #FECACA"
+          onclick="disableUser('${u.user_id}')">無効化</button>
+      </td>
+    </tr>`).join('');
+}
+
+function showAddUser() { document.getElementById('user-form-card').style.display = 'block'; }
+function hideUserForm() { document.getElementById('user-form-card').style.display = 'none'; }
+
+function addUser() {
+  const data = {
+    name: document.getElementById('u-name').value,
+    email: document.getElementById('u-email').value,
+    role: document.getElementById('u-role').value,
+    area: document.getElementById('u-area').value,
+  };
+  if (!data.name || !data.email) { showToast('名前とメールは必須です', 'error'); return; }
+  google.script.run
+    .withSuccessHandler(async () => {
+      showToast('ユーザーを追加しました', 'success');
+      hideUserForm();
+      await loadUsers(); renderUsers();
+    })
+    .withFailureHandler(e => showToast(e.message, 'error'))
+    .serverAction('createUser', data);
+}
+
+function disableUser(userId) {
+  if (!confirm('このユーザーを無効化しますか？')) return;
+  google.script.run
+    .withSuccessHandler(async () => {
+      showToast('無効化しました', 'success');
+      await loadUsers(); renderUsers();
+    })
+    .withFailureHandler(e => showToast(e.message, 'error'))
+    .serverAction('updateUser', { user_id: userId, active: 'FALSE' });
+}
+
+// ── レポート設定 ──
+function saveReportSettings() {
+  const kvs = [
+    { key: 'REPORT_RECIPIENTS', value: document.getElementById('s-recipients').value },
+    { key: 'REPORT_SCHEDULE', value: document.getElementById('s-schedule').value },
+    { key: 'REMINDER_DAYS_BEFORE', value: document.getElementById('s-reminder').value },
+    { key: 'EMAIL_SCAN_INTERVAL', value: document.getElementById('s-email-interval').value },
+  ];
+  let done = 0;
+  kvs.forEach(kv => {
+    google.script.run
+      .withSuccessHandler(() => { done++; if (done === kvs.length) showToast('設定を保存しました', 'success'); })
+      .withFailureHandler(e => showToast(e.message, 'error'))
+      .serverAction('setFeature', kv);
+  });
+}
+
+// ── システム ──
+function renderSystemStatus() {
+  google.script.run
+    .withSuccessHandler(res => {
+      const parsed = typeof res === 'string' ? JSON.parse(res) : res;
+      const triggers = parsed.success ? parsed.data : [];
+      document.getElementById('system-status').innerHTML = `
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div style="background:#F9FAFB;border-radius:6px;padding:14px">
+            <div style="font-size:12px;color:#6B7280">登録トリガー数</div>
+            <div style="font-size:24px;font-weight:bold;color:var(--primary)">${triggers.length}</div>
+          </div>
+          <div style="background:#F9FAFB;border-radius:6px;padding:14px">
+            <div style="font-size:12px;color:#6B7280">システムバージョン</div>
+            <div style="font-size:24px;font-weight:bold;color:var(--dark)">${settings.SYSTEM_VERSION||'1.0.0'}</div>
+          </div>
+        </div>
+        <div style="margin-top:16px">
+          <div style="font-size:12px;color:#6B7280;margin-bottom:8px">登録済みトリガー</div>
+          ${triggers.map(t => `<div style="padding:6px 0;border-bottom:1px solid var(--border);font-size:13px">⏱ ${t.function}</div>`).join('')}
+        </div>`;
+    })
+    .withFailureHandler(() => {
+      document.getElementById('system-status').textContent = '取得失敗';
+    })
+    .serverAction('getTriggerStatus', {});
+}
+
+function resetTriggers() {
+  google.script.run
+    .withSuccessHandler(() => { showToast('トリガーを再設定しました', 'success'); renderSystemStatus(); })
+    .withFailureHandler(e => showToast(e.message, 'error'))
+    .serverAction('setupTriggers', {});
+}
+
+function testReport() {
+  if (!confirm('テストレポートを今すぐ送信しますか？')) return;
+  google.script.run
+    .withSuccessHandler(() => showToast('レポートを送信しました', 'success'))
+    .withFailureHandler(e => showToast(e.message, 'error'))
+    .generateWeeklyReport();
+}
+
+function runEmailScan() {
+  google.script.run
+    .withSuccessHandler(() => showToast('メールスキャンを実行しました', 'success'))
+    .withFailureHandler(e => showToast(e.message, 'error'))
+    .scanEmails();
+}
+
+// ── タブ ──
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    const names = ['features','users','report','system'];
+    t.classList.toggle('active', names[i] === name);
+  });
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  const panel = document.getElementById(`panel-${name}`);
+  if (panel) panel.classList.add('active');
+
+  if (name === 'report') {
+    document.getElementById('s-recipients').value = settings.REPORT_RECIPIENTS || '';
+    document.getElementById('s-schedule').value = settings.REPORT_SCHEDULE || 'WEEKLY';
+    document.getElementById('s-reminder').value = settings.REMINDER_DAYS_BEFORE || '3';
+    document.getElementById('s-email-interval').value = settings.EMAIL_SCAN_INTERVAL || '15';
+  }
+}
+
+// ── ユーティリティ ──
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function showToast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = (type==='success'?'✅ ':'❌ ') + msg;
+  el.className = `toast-${type}`;
+  el.style.display = 'block';
+  setTimeout(() => { el.style.display = 'none'; }, 3500);
+}
+
+// ── メイン画面へ戻る（GASサンドボックス対策）──
+function goMain(e) {
+  if (e) e.preventDefault();
+  google.script.run
+    .withSuccessHandler(function (url) { window.open(url, '_top'); })
+    .withFailureHandler(function () { window.open('.', '_top'); })
+    .getWebAppUrl();
+}
+</script>
+</body>
+</html>

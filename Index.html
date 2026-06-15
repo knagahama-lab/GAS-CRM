@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GAS CRM</title>
+<style>
+:root {
+  --primary: #1A56DB; --primary-light: #EFF6FF; --primary-dark: #1e40af;
+  --green: #0E9F6E; --red: #E02424; --amber: #D97706;
+  --dark: #1F2937; --mid: #374151; --gray: #6B7280;
+  --light: #F3F4F6; --white: #FFFFFF; --border: #E5E7EB;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #F9FAFB; color: var(--dark); font-size: 14px; }
+
+/* ── Sidebar ── */
+#sidebar {
+  position: fixed; left: 0; top: 0; bottom: 0; width: 220px;
+  background: var(--dark); color: white; z-index: 100; overflow-y: auto;
+}
+.sidebar-logo {
+  padding: 20px 16px; font-size: 18px; font-weight: bold;
+  color: white; border-bottom: 1px solid #374151;
+}
+.sidebar-logo span { color: #60A5FA; }
+.sidebar-user { padding: 12px 16px; background: #374151; font-size: 12px; color: #9CA3AF; }
+.nav-section { padding: 8px 0; }
+.nav-label { padding: 4px 16px; font-size: 11px; color: #6B7280; text-transform: uppercase; letter-spacing: 0.08em; }
+.nav-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px; cursor: pointer; color: #D1D5DB; transition: all 0.15s;
+  font-size: 14px; border: none; background: none; width: 100%; text-align: left;
+}
+.nav-item:hover { background: #374151; color: white; }
+.nav-item.active { background: var(--primary); color: white; }
+.nav-item .icon { width: 18px; text-align: center; }
+
+/* ── Main ── */
+#main { margin-left: 220px; min-height: 100vh; }
+.topbar {
+  position: sticky; top: 0; background: white; border-bottom: 1px solid var(--border);
+  padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; z-index: 50;
+}
+.topbar-title { font-size: 18px; font-weight: 600; }
+.topbar-actions { display: flex; gap: 8px; align-items: center; }
+#content { padding: 24px; }
+
+/* ── Cards ── */
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px; }
+.kpi-card {
+  background: white; border-radius: 8px; padding: 20px;
+  border-left: 4px solid var(--primary); box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.kpi-value { font-size: 28px; font-weight: bold; color: var(--primary); }
+.kpi-label { color: var(--gray); font-size: 13px; margin-top: 4px; }
+.kpi-sub { color: var(--green); font-size: 12px; margin-top: 2px; }
+
+/* ── Table ── */
+.card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 20px; overflow: hidden; }
+.card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.card-title { font-weight: 600; font-size: 15px; }
+.card-body { padding: 0; overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+th { background: #F8FAFC; padding: 10px 14px; text-align: left; font-size: 12px; color: var(--gray); border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 12px 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tr:last-child td { border-bottom: none; }
+tr:hover td { background: var(--primary-light); }
+.td-actions { white-space: nowrap; }
+
+/* ── Buttons ── */
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 6px; border: none; cursor: pointer; font-size: 13px; font-weight: 500; transition: all 0.15s; }
+.btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-dark); }
+.btn-sm { padding: 5px 10px; font-size: 12px; }
+.btn-outline { background: white; border: 1px solid var(--border); color: var(--mid); }
+.btn-outline:hover { background: var(--light); }
+.btn-danger { background: #FEF2F2; color: var(--red); border: 1px solid #FECACA; }
+.btn-green { background: #F0FDF4; color: var(--green); border: 1px solid #BBF7D0; }
+
+/* ── Badges ── */
+.badge { display: inline-block; padding: 3px 8px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+.badge-prospect { background: #FEF3C7; color: #92400E; }
+.badge-approach { background: #DBEAFE; color: #1E40AF; }
+.badge-proposal { background: #EDE9FE; color: #5B21B6; }
+.badge-negotiation { background: #FEE2E2; color: #991B1B; }
+.badge-won { background: #D1FAE5; color: #065F46; }
+.badge-lost { background: #F3F4F6; color: #6B7280; }
+.badge-active { background: #D1FAE5; color: #065F46; }
+.badge-inactive { background: #F3F4F6; color: #6B7280; }
+.badge-prospect-c { background: #FEF3C7; color: #92400E; }
+
+/* ── Modal ── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; display: flex; align-items: center; justify-content: center; }
+.modal { background: white; border-radius: 12px; width: 560px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
+.modal-header { padding: 20px 24px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+.modal-title { font-size: 16px; font-weight: 600; }
+.modal-close { background: none; border: none; font-size: 20px; cursor: pointer; color: var(--gray); padding: 4px; }
+.modal-body { padding: 20px 24px; }
+.modal-footer { padding: 16px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ── Form ── */
+.form-group { margin-bottom: 16px; }
+.form-label { display: block; font-size: 13px; font-weight: 500; color: var(--mid); margin-bottom: 6px; }
+.form-label .required { color: var(--red); margin-left: 2px; }
+.form-control {
+  width: 100%; padding: 8px 12px; border: 1px solid var(--border);
+  border-radius: 6px; font-size: 14px; color: var(--dark);
+  transition: border-color 0.15s;
+}
+.form-control:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(26,86,219,0.1); }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+textarea.form-control { min-height: 80px; resize: vertical; }
+
+/* ── Search ── */
+.search-bar { display: flex; align-items: center; gap: 8px; }
+.search-bar input { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; width: 250px; }
+
+/* ── Loading ── */
+.loading { display: flex; align-items: center; justify-content: center; padding: 60px; color: var(--gray); }
+.spinner { width: 32px; height: 32px; border: 3px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Toast ── */
+#toast-container { position: fixed; top: 20px; right: 20px; z-index: 999; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  padding: 12px 18px; border-radius: 8px; color: white; font-size: 14px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15); animation: slideIn 0.3s ease;
+  max-width: 360px;
+}
+.toast-success { background: var(--green); }
+.toast-error { background: var(--red); }
+.toast-info { background: var(--primary); }
+@keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+/* ── Pipeline ── */
+.pipeline-bar { display: flex; border-radius: 6px; overflow: hidden; height: 28px; margin: 8px 0; }
+.pipeline-segment { display: flex; align-items: center; justify-content: center; font-size: 11px; color: white; font-weight: 600; transition: flex 0.3s; min-width: 0; overflow: hidden; }
+
+/* ── Empty ── */
+.empty-state { padding: 60px; text-align: center; color: var(--gray); }
+.empty-icon { font-size: 48px; margin-bottom: 12px; }
+
+/* ── Kanban ── */
+.kanban-board { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 8px; }
+.kanban-col { background: var(--light); border-radius: 8px; padding: 12px; min-width: 160px; }
+.kanban-col-header { font-weight: 600; font-size: 13px; margin-bottom: 8px; color: var(--mid); display: flex; justify-content: space-between; }
+.kanban-col-count { background: var(--border); border-radius: 10px; padding: 1px 7px; font-size: 11px; }
+.kanban-card { background: white; border-radius: 6px; padding: 10px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); cursor: pointer; transition: box-shadow 0.15s; }
+.kanban-card:hover { box-shadow: 0 3px 8px rgba(0,0,0,0.12); }
+.kanban-card-name { font-weight: 500; font-size: 13px; margin-bottom: 4px; }
+.kanban-card-amount { color: var(--primary); font-size: 12px; font-weight: 600; }
+.kanban-card-company { color: var(--gray); font-size: 11px; }
+
+/* ── Section tabs ── */
+.tabs { display: flex; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+.tab { padding: 10px 18px; cursor: pointer; color: var(--gray); border-bottom: 2px solid transparent; font-size: 14px; font-weight: 500; transition: all 0.15s; }
+.tab:hover { color: var(--primary); }
+.tab.active { color: var(--primary); border-bottom-color: var(--primary); }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<nav id="sidebar">
+  <div class="sidebar-logo">📊 GAS <span>CRM</span></div>
+  <div class="sidebar-user" id="sidebar-user">読み込み中...</div>
+  <div class="nav-section">
+    <div class="nav-label">メニュー</div>
+    <button class="nav-item active" onclick="navigate('dashboard')"><span class="icon">🏠</span>ダッシュボード</button>
+    <button class="nav-item" onclick="navigate('customers')" id="nav-customers"><span class="icon">👥</span>顧客管理</button>
+    <button class="nav-item" onclick="navigate('deals')" id="nav-deals"><span class="icon">💼</span>商談管理</button>
+    <button class="nav-item" onclick="navigate('kanban')" id="nav-kanban"><span class="icon">📋</span>カンバン</button>
+    <button class="nav-item" onclick="navigate('activities')" id="nav-activities"><span class="icon">📝</span>活動ログ</button>
+  </div>
+  <div class="nav-section" id="nav-admin-section" style="display:none">
+    <div class="nav-label">管理</div>
+    <button class="nav-item" onclick="navigate('admin')"><span class="icon">⚙️</span>管理画面</button>
+  </div>
+</nav>
+
+<!-- Main -->
+<div id="main">
+  <div class="topbar">
+    <div class="topbar-title" id="page-title">ダッシュボード</div>
+    <div class="topbar-actions">
+      <button class="btn btn-outline btn-sm" onclick="refreshPage()">🔄 更新</button>
+      <button class="btn btn-primary btn-sm" onclick="showQuickAdd()">＋ クイック追加</button>
+    </div>
+  </div>
+  <div id="content">
+    <div class="loading"><div class="spinner"></div>読み込み中...</div>
+  </div>
+</div>
+
+<div id="toast-container"></div>
+<div id="modal-root"></div>
+
+<script>
+// ── 状態管理 ──────────────────────────────────────────────
+const state = {
+  currentPage: 'dashboard',
+  initData: null,
+  customers: [],
+  deals: [],
+  activities: [],
+};
+
+// ── 初期化 ────────────────────────────────────────────────
+window.onload = async () => {
+  try {
+    const res = await call('getInitData');
+    state.initData = res;
+    document.getElementById('sidebar-user').textContent =
+      `${res.user.name || res.user.email}\n${res.user.role || ''}`;
+    if (res.isAdmin || res.isManager) {
+      document.getElementById('nav-admin-section').style.display = 'block';
+    }
+    // 機能フラグでナビを制御
+    const s = res.settings;
+    if (!boolSetting(s, 'FEATURE_CUSTOMERS')) hide('nav-customers');
+    if (!boolSetting(s, 'FEATURE_DEALS'))     hide('nav-deals');
+    if (!boolSetting(s, 'FEATURE_KANBAN'))    hide('nav-kanban');
+    if (!boolSetting(s, 'FEATURE_ACTIVITIES'))hide('nav-activities');
+
+    navigate('dashboard');
+  } catch(e) {
+    showError('初期化エラー: ' + e.message);
+  }
+};
+
+function boolSetting(s, key) {
+  return !s || s[key] === undefined || String(s[key]).toUpperCase() === 'TRUE';
+}
+function hide(id) { const el = document.getElementById(id); if(el) el.style.display='none'; }
+
+// ── ナビゲーション ────────────────────────────────────────
+function navigate(page) {
+  state.currentPage = page;
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+  const titles = { dashboard:'ダッシュボード', customers:'顧客管理', deals:'商談管理', kanban:'カンバンボード', activities:'活動ログ', admin:'管理画面' };
+  document.getElementById('page-title').textContent = titles[page] || page;
+
+  switch(page) {
+    case 'dashboard':  renderDashboard(); break;
+    case 'customers':  renderCustomers(); break;
+    case 'deals':      renderDeals(); break;
+    case 'kanban':     renderKanban(); break;
+    case 'activities': renderActivities(); break;
+    case 'admin':
+      // GASサンドボックス対策: 実Web App URLを取得しトップフレームを遷移
+      google.script.run
+        .withSuccessHandler(function (url) { window.open(url + '?page=admin', '_top'); })
+        .withFailureHandler(function () { window.open('?page=admin', '_top'); })
+        .getWebAppUrl();
+      break;
+  }
+}
+
+function refreshPage() { navigate(state.currentPage); }
+
+// ── ダッシュボード ────────────────────────────────────────
+async function renderDashboard() {
+  setContent('<div class="loading"><div class="spinner"></div>集計中...</div>');
+  const [kpi, pipeline, recent, nearClose] = await Promise.all([
+    call('getKpiSummary'),
+    call('getPipelineSummary'),
+    call('getRecentActivities', { limit: 5 }),
+    call('getDealsNearClose', { days: 7 }),
+  ]);
+
+  const phaseColors = { PROSPECT:'#6B7280', APPROACH:'#3B82F6', PROPOSAL:'#8B5CF6', NEGOTIATION:'#F59E0B', CLOSED_WON:'#10B981', CLOSED_LOST:'#EF4444' };
+  const phaseLabels = { PROSPECT:'見込み', APPROACH:'アプローチ', PROPOSAL:'提案', NEGOTIATION:'交渉', CLOSED_WON:'受注', CLOSED_LOST:'失注' };
+  const totalCount = Object.values(pipeline).reduce((s,p) => s + p.count, 0) || 1;
+  const pipelineBar = Object.entries(pipeline).map(([phase, data]) => {
+    const pct = Math.round(data.count / totalCount * 100);
+    return pct > 0 ? `<div class="pipeline-segment" style="flex:${pct};background:${phaseColors[phase]}" title="${phaseLabels[phase]}: ${data.count}件">${pct}%</div>` : '';
+  }).join('');
+
+  const nearCloseRows = (nearClose || []).slice(0,5).map(d => `
+    <tr><td>${d.deal_name}</td><td>${d.company_name}</td>
+    <td>¥${Number(d.amount||0).toLocaleString()}</td>
+    <td>${d.probability}%</td><td>${fmtDate(d.close_date)}</td></tr>`).join('') ||
+    '<tr><td colspan="5" style="text-align:center;color:#9CA3AF;padding:20px">予定なし</td></tr>';
+
+  const recentRows = (recent || []).slice(0,5).map(a => `
+    <tr><td>${a.type}</td><td>${a.subject}</td><td>${fmtDate(a.activity_date)}</td></tr>`).join('') ||
+    '<tr><td colspan="3" style="text-align:center;color:#9CA3AF;padding:20px">活動なし</td></tr>';
+
+  setContent(`
+    <div class="kpi-grid">
+      <div class="kpi-card"><div class="kpi-value">${kpi.totalCustomers||0}</div><div class="kpi-label">👥 総顧客数</div></div>
+      <div class="kpi-card"><div class="kpi-value">${kpi.activeDeals||0}</div><div class="kpi-label">💼 進行中商談数</div></div>
+      <div class="kpi-card" style="border-color:#10B981"><div class="kpi-value" style="color:#10B981">¥${(kpi.wonAmountThisMonth||0).toLocaleString()}</div><div class="kpi-label">✅ 今月受注金額</div></div>
+      <div class="kpi-card" style="border-color:#8B5CF6"><div class="kpi-value" style="color:#8B5CF6">${kpi.activitiesThisMonth||0}</div><div class="kpi-label">📝 今月活動数</div></div>
+    </div>
+    <div class="card" style="margin-bottom:20px">
+      <div class="card-header"><div class="card-title">📈 パイプライン状況</div></div>
+      <div class="card-body" style="padding:16px 20px">
+        <div class="pipeline-bar">${pipelineBar}</div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px">
+          ${Object.entries(phaseLabels).map(([k,v]) => `<span style="font-size:12px;color:#6B7280"><span style="display:inline-block;width:10px;height:10px;background:${phaseColors[k]};border-radius:50%;margin-right:4px"></span>${v}: ${pipeline[k]?.count||0}件</span>`).join('')}
+        </div>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div class="card">
+        <div class="card-header"><div class="card-title">🔥 クローズ予定（7日以内）</div></div>
+        <div class="card-body"><table><thead><tr><th>商談名</th><th>顧客</th><th>金額</th><th>確度</th><th>予定日</th></tr></thead><tbody>${nearCloseRows}</tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">📝 最近の活動</div></div>
+        <div class="card-body"><table><thead><tr><th>種別</th><th>件名</th><th>日時</th></tr></thead><tbody>${recentRows}</tbody></table></div>
+      </div>
+    </div>`);
+}
+
+// ── 顧客管理 ──────────────────────────────────────────────
+async function renderCustomers(search) {
+  setContent('<div class="loading"><div class="spinner"></div>読み込み中...</div>');
+  const data = search ? await call('searchCustomers', { query: search }) : await call('getAllCustomers');
+  state.customers = data || [];
+
+  const rows = state.customers.map(c => `
+    <tr>
+      <td><strong>${esc(c.company_name)}</strong></td>
+      <td>${esc(c.industry||'')}</td>
+      <td>${esc(c.email||'')}</td>
+      <td>${esc(c.phone||'')}</td>
+      <td><span class="badge badge-${(c.status||'').toLowerCase().replace('_','-')}">${statusLabel(c.status)}</span></td>
+      <td>${fmtDate(c.last_contact_date)||'—'}</td>
+      <td>${esc(c.assigned_user||'')}</td>
+      <td class="td-actions">
+        <button class="btn btn-sm btn-outline" onclick="showCustomerDetail('${esc(c.customer_id)}')">詳細</button>
+        <button class="btn btn-sm btn-green" onclick="showAddActivity('${esc(c.customer_id)}','','${esc(c.company_name)}')">活動</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="8" style="text-align:center;padding:40px;color:#9CA3AF">顧客がいません</td></tr>';
+
+  setContent(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div class="search-bar">
+        <input type="text" id="cust-search" placeholder="会社名・メール・電話で検索" onkeyup="if(event.key==='Enter')renderCustomers(this.value)" value="${search||''}">
+        <button class="btn btn-outline" onclick="renderCustomers(document.getElementById('cust-search').value)">🔍</button>
+        <button class="btn btn-outline" onclick="renderCustomers('')">クリア</button>
+      </div>
+      <button class="btn btn-primary" onclick="showAddCustomer()">＋ 顧客追加</button>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">👥 顧客一覧（${state.customers.length}件）</div></div>
+      <div class="card-body">
+        <table><thead><tr><th>会社名</th><th>業種</th><th>メール</th><th>電話</th><th>状態</th><th>最終コンタクト</th><th>担当</th><th>操作</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      </div>
+    </div>`);
+}
+
+// ── 商談管理 ──────────────────────────────────────────────
+async function renderDeals() {
+  setContent('<div class="loading"><div class="spinner"></div>読み込み中...</div>');
+  const data = await call('getAllDeals');
+  state.deals = data || [];
+
+  const phaseLabels = { PROSPECT:'見込み', APPROACH:'アプローチ', PROPOSAL:'提案', NEGOTIATION:'交渉', CLOSED_WON:'受注', CLOSED_LOST:'失注' };
+  const rows = state.deals.map(d => `
+    <tr>
+      <td><strong>${esc(d.deal_name)}</strong></td>
+      <td>${esc(d.company_name||'')}</td>
+      <td><span class="badge badge-${phaseClass(d.phase)}">${phaseLabels[d.phase]||d.phase}</span></td>
+      <td style="text-align:right">¥${Number(d.amount||0).toLocaleString()}</td>
+      <td style="text-align:center">${d.probability||0}%</td>
+      <td style="text-align:right">¥${Number(d.weighted_amount||0).toLocaleString()}</td>
+      <td>${fmtDate(d.close_date)||'—'}</td>
+      <td>${esc(d.assigned_user||'')}</td>
+      <td class="td-actions">
+        <button class="btn btn-sm btn-outline" onclick="showDealDetail('${esc(d.deal_id)}')">詳細</button>
+        <button class="btn btn-sm btn-green" onclick="showAddActivity('${esc(d.customer_id)}','${esc(d.deal_id)}','${esc(d.company_name)}')">活動</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="9" style="text-align:center;padding:40px;color:#9CA3AF">商談がありません</td></tr>';
+
+  setContent(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div></div>
+      <button class="btn btn-primary" onclick="showAddDeal()">＋ 商談追加</button>
+    </div>
+    <div class="card">
+      <div class="card-header"><div class="card-title">💼 商談一覧（${state.deals.length}件）</div></div>
+      <div class="card-body">
+        <table><thead><tr><th>商談名</th><th>顧客</th><th>フェーズ</th><th>金額</th><th>確度</th><th>加重</th><th>クローズ予定日</th><th>担当</th><th>操作</th></tr></thead>
+        <tbody>${rows}</tbody></table>
+      </div>
+    </div>`);
+}
+
+// ── カンバン ──────────────────────────────────────────────
+async function renderKanban() {
+  setContent('<div class="loading"><div class="spinner"></div>読み込み中...</div>');
+  const kanban = await call('getKanbanData');
+  const phaseLabels = { PROSPECT:'見込み', APPROACH:'アプローチ', PROPOSAL:'提案', NEGOTIATION:'交渉', CLOSED_WON:'受注', CLOSED_LOST:'失注' };
+  const phaseColors = { PROSPECT:'#6B7280', APPROACH:'#3B82F6', PROPOSAL:'#8B5CF6', NEGOTIATION:'#F59E0B', CLOSED_WON:'#10B981', CLOSED_LOST:'#EF4444' };
+
+  const cols = Object.entries(phaseLabels).map(([phase, label]) => {
+    const deals = kanban[phase] || [];
+    const cards = deals.map(d => `
+      <div class="kanban-card" onclick="showDealDetail('${esc(d.deal_id)}')">
+        <div class="kanban-card-name">${esc(d.deal_name)}</div>
+        <div class="kanban-card-company">${esc(d.company_name||'')}</div>
+        <div class="kanban-card-amount">¥${Number(d.amount||0).toLocaleString()}</div>
+      </div>`).join('');
+    const total = deals.reduce((s, d) => s + (Number(d.amount)||0), 0);
+    return `<div class="kanban-col">
+      <div class="kanban-col-header" style="color:${phaseColors[phase]}">
+        ${label}<span class="kanban-col-count">${deals.length}</span>
+      </div>
+      <div style="font-size:11px;color:#6B7280;margin-bottom:8px">¥${total.toLocaleString()}</div>
+      ${cards}
+    </div>`;
+  }).join('');
+
+  setContent(`<div class="kanban-board">${cols}</div>`);
+}
+
+// ── 活動ログ ──────────────────────────────────────────────
+async function renderActivities() {
+  setContent('<div class="loading"><div class="spinner"></div>読み込み中...</div>');
+  const [data, pending] = await Promise.all([
+    call('getRecentActivities', { limit: 50 }),
+    call('getPendingNextActions'),
+  ]);
+  state.activities = data || [];
+
+  const typeIcon = { CALL:'📞', EMAIL:'📧', VISIT:'🏢', MEETING:'🤝', DEMO:'💻', OTHER:'📝' };
+  const rows = state.activities.map(a => `
+    <tr>
+      <td>${typeIcon[a.type]||'📝'} ${a.type}</td>
+      <td><strong>${esc(a.subject||'')}</strong></td>
+      <td>${esc(a.customer_id||'')}</td>
+      <td>${fmtDate(a.activity_date)}</td>
+      <td>${esc(a.next_action||'')}</td>
+      <td>${fmtDate(a.next_action_date)||'—'}</td>
+    </tr>`).join('') || '<tr><td colspan="6" style="text-align:center;padding:40px;color:#9CA3AF">活動がありません</td></tr>';
+
+  const pendingRows = (pending||[]).slice(0,5).map(a => `
+    <tr>
+      <td>${esc(a.next_action)}</td>
+      <td>${fmtDate(a.next_action_date)}</td>
+      <td>${esc(a.customer_id)}</td>
+    </tr>`).join('') || '<tr><td colspan="3" style="text-align:center;padding:20px;color:#9CA3AF">なし</td></tr>';
+
+  setContent(`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div></div>
+      <button class="btn btn-primary" onclick="showAddActivity()">＋ 活動記録</button>
+    </div>
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px">
+      <div class="card">
+        <div class="card-header"><div class="card-title">📝 最近の活動（${state.activities.length}件）</div></div>
+        <div class="card-body"><table><thead><tr><th>種別</th><th>件名</th><th>顧客ID</th><th>日時</th><th>次回アクション</th><th>予定日</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">⏰ 未完了アクション</div></div>
+        <div class="card-body"><table><thead><tr><th>アクション</th><th>予定日</th><th>顧客</th></tr></thead>
+        <tbody>${pendingRows}</tbody></table></div>
+      </div>
+    </div>`);
+}
+
+// ── モーダル: 顧客追加 ────────────────────────────────────
+function showAddCustomer() {
+  const masters = state.initData?.masters || {};
+  const industries = (masters.industries||[]).map(i => `<option value="${i.code}">${i.label}</option>`).join('');
+  const users = (state.initData?.users||[]).map(u => `<option value="${u.email}">${u.name||u.email}</option>`).join('');
+
+  showModal('👥 顧客追加', `
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">会社名<span class="required">*</span></label><input class="form-control" id="f-company" placeholder="株式会社○○"></div>
+      <div class="form-group"><label class="form-label">業種</label><select class="form-control" id="f-industry"><option value="">選択</option>${industries}</select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">メール<span class="required">*</span></label><input class="form-control" id="f-email" type="email" placeholder="info@example.com"></div>
+      <div class="form-group"><label class="form-label">電話</label><input class="form-control" id="f-phone" placeholder="0312345678"></div>
+    </div>
+    <div class="form-group"><label class="form-label">住所</label><input class="form-control" id="f-address"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">担当者</label><select class="form-control" id="f-user">${users}</select></div>
+      <div class="form-group"><label class="form-label">ステータス</label>
+        <select class="form-control" id="f-status">
+          <option value="PROSPECT">見込み客</option><option value="ACTIVE">取引中</option><option value="INACTIVE">休眠</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label class="form-label">メモ</label><textarea class="form-control" id="f-notes" rows="3"></textarea></div>`,
+  async () => {
+    const data = {
+      company_name: val('f-company'), industry: val('f-industry'),
+      email: val('f-email'), phone: val('f-phone'),
+      address: val('f-address'), assigned_user: val('f-user'),
+      status: val('f-status'), notes: val('f-notes'),
+    };
+    if (!data.company_name) return showError('会社名は必須です');
+    if (!data.email) return showError('メールは必須です');
+    const res = await call('createCustomer', data);
+    if (!res) return;
+    closeModal(); showSuccess('顧客を登録しました'); renderCustomers();
+  });
+}
+
+// ── モーダル: 商談追加 ────────────────────────────────────
+function showAddDeal(customerId, companyName) {
+  const masters = state.initData?.masters || {};
+  const phases = (masters.phases||[]).map(p => `<option value="${p.code}">${p.label}</option>`).join('');
+  const customers = state.customers.map(c => `<option value="${c.customer_id}" data-name="${esc(c.company_name)}">${c.company_name}</option>`).join('');
+  const users = (state.initData?.users||[]).map(u => `<option value="${u.email}">${u.name||u.email}</option>`).join('');
+
+  showModal('💼 商談追加', `
+    <div class="form-group"><label class="form-label">顧客<span class="required">*</span></label>
+      <select class="form-control" id="f-cust">${customers}</select></div>
+    <div class="form-group"><label class="form-label">商談名<span class="required">*</span></label><input class="form-control" id="f-dname" placeholder="○○システム導入プロジェクト"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">フェーズ</label><select class="form-control" id="f-phase">${phases}</select></div>
+      <div class="form-group"><label class="form-label">担当者</label><select class="form-control" id="f-user">${users}</select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">金額（円）</label><input class="form-control" id="f-amount" type="number" placeholder="1000000"></div>
+      <div class="form-group"><label class="form-label">確度（%）</label><input class="form-control" id="f-prob" type="number" min="0" max="100" value="50"></div>
+    </div>
+    <div class="form-group"><label class="form-label">クローズ予定日</label><input class="form-control" id="f-close" type="date"></div>
+    <div class="form-group"><label class="form-label">メモ</label><textarea class="form-control" id="f-notes" rows="2"></textarea></div>`,
+  async () => {
+    const custId = val('f-cust');
+    const custEl = document.querySelector('#f-cust option:checked');
+    const data = {
+      customer_id: custId,
+      company_name: custEl?.dataset.name || '',
+      deal_name: val('f-dname'), phase: val('f-phase'),
+      amount: val('f-amount'), probability: val('f-prob'),
+      close_date: val('f-close'), assigned_user: val('f-user'),
+      notes: val('f-notes'),
+    };
+    if (!data.deal_name) return showError('商談名は必須です');
+    const res = await call('createDeal', data);
+    if (!res) return;
+    closeModal(); showSuccess('商談を登録しました'); renderDeals();
+  });
+}
+
+// ── モーダル: 活動記録 ────────────────────────────────────
+function showAddActivity(customerId, dealId, companyName) {
+  const masters = state.initData?.masters || {};
+  const actTypes = (masters.activityTypes||[]).map(t => `<option value="${t.code}">${t.label}</option>`).join('');
+  const customers = state.customers.map(c => `<option value="${c.customer_id}" ${c.customer_id===customerId?'selected':''}>${c.company_name}</option>`).join('');
+  const today = new Date().toISOString().split('T')[0];
+
+  showModal('📝 活動記録', `
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">顧客</label><select class="form-control" id="f-cust">${customers}</select></div>
+      <div class="form-group"><label class="form-label">種別<span class="required">*</span></label><select class="form-control" id="f-type">${actTypes}</select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">活動日<span class="required">*</span></label><input class="form-control" id="f-date" type="date" value="${today}"></div>
+      <div class="form-group"><label class="form-label">件名<span class="required">*</span></label><input class="form-control" id="f-subject" placeholder="初回訪問・提案MTGなど"></div>
+    </div>
+    <div class="form-group"><label class="form-label">活動内容</label><textarea class="form-control" id="f-content" rows="3" placeholder="活動の詳細を記録してください"></textarea></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">次回アクション</label><input class="form-control" id="f-next" placeholder="提案書送付、フォローアップなど"></div>
+      <div class="form-group"><label class="form-label">次回予定日</label><input class="form-control" id="f-nextdate" type="date"></div>
+    </div>`,
+  async () => {
+    const data = {
+      customer_id: val('f-cust'), deal_id: dealId||'',
+      type: val('f-type'), activity_date: val('f-date'),
+      subject: val('f-subject'), content: val('f-content'),
+      next_action: val('f-next'), next_action_date: val('f-nextdate'),
+    };
+    if (!data.subject) return showError('件名は必須です');
+    const res = await call('createActivity', data);
+    if (!res) return;
+    closeModal(); showSuccess('活動を記録しました'); renderActivities();
+  });
+}
+
+// ── 商談詳細モーダル ──────────────────────────────────────
+async function showDealDetail(dealId) {
+  const deal = state.deals.find(d => d.deal_id === dealId);
+  if (!deal) return;
+  const phaseLabels = { PROSPECT:'見込み', APPROACH:'アプローチ', PROPOSAL:'提案', NEGOTIATION:'交渉', CLOSED_WON:'受注', CLOSED_LOST:'失注' };
+  const masters = state.initData?.masters || {};
+  const phaseOpts = (masters.phases||[]).map(p => `<option value="${p.code}" ${p.code===deal.phase?'selected':''}>${p.label}</option>`).join('');
+
+  showModal(`💼 ${deal.deal_name}`, `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div><div style="font-size:12px;color:#6B7280">顧客</div><div style="font-weight:500">${esc(deal.company_name)}</div></div>
+      <div><div style="font-size:12px;color:#6B7280">金額</div><div style="font-weight:500;color:#1A56DB">¥${Number(deal.amount||0).toLocaleString()}</div></div>
+      <div><div style="font-size:12px;color:#6B7280">確度</div><div>${deal.probability}%</div></div>
+      <div><div style="font-size:12px;color:#6B7280">クローズ予定日</div><div>${fmtDate(deal.close_date)||'未設定'}</div></div>
+    </div>
+    <div class="form-group"><label class="form-label">フェーズを変更</label>
+      <select class="form-control" id="f-phase">${phaseOpts}</select>
+    </div>
+    <div class="form-group"><label class="form-label">メモ</label>
+      <textarea class="form-control" id="f-notes" rows="3">${esc(deal.notes||'')}</textarea>
+    </div>`,
+  async () => {
+    await call('updateDealPhase', { deal_id: dealId, phase: val('f-phase') });
+    await call('updateDeal', { deal_id: dealId, notes: val('f-notes') });
+    closeModal(); showSuccess('商談を更新しました'); renderDeals();
+  }, '更新');
+}
+
+// ── 顧客詳細モーダル ──────────────────────────────────────
+async function showCustomerDetail(customerId) {
+  const cust = state.customers.find(c => c.customer_id === customerId);
+  if (!cust) return;
+  const [deals, activities] = await Promise.all([
+    call('getDealsByCustomer', { customer_id: customerId }),
+    call('getActivitiesByCustomer', { customer_id: customerId }),
+  ]);
+
+  const dealRows = (deals||[]).map(d => `<tr><td>${esc(d.deal_name)}</td><td>¥${Number(d.amount||0).toLocaleString()}</td><td>${d.phase}</td></tr>`).join('') ||
+    '<tr><td colspan="3" style="text-align:center;color:#9CA3AF">商談なし</td></tr>';
+  const actRows = (activities||[]).slice(0,5).map(a => `<tr><td>${a.type}</td><td>${esc(a.subject)}</td><td>${fmtDate(a.activity_date)}</td></tr>`).join('') ||
+    '<tr><td colspan="3" style="text-align:center;color:#9CA3AF">活動なし</td></tr>';
+
+  showModal(`👥 ${cust.company_name}`, `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+      <div><div style="font-size:12px;color:#6B7280">業種</div><div>${esc(cust.industry||'—')}</div></div>
+      <div><div style="font-size:12px;color:#6B7280">ステータス</div><div>${statusLabel(cust.status)}</div></div>
+      <div><div style="font-size:12px;color:#6B7280">メール</div><div>${esc(cust.email||'—')}</div></div>
+      <div><div style="font-size:12px;color:#6B7280">電話</div><div>${esc(cust.phone||'—')}</div></div>
+      <div><div style="font-size:12px;color:#6B7280">最終コンタクト</div><div>${fmtDate(cust.last_contact_date)||'—'}</div></div>
+      <div><div style="font-size:12px;color:#6B7280">担当</div><div>${esc(cust.assigned_user||'—')}</div></div>
+    </div>
+    <div class="tabs"><div class="tab active" onclick="switchTab(this,'t-deals','t-acts')">商談（${deals?.length||0}）</div><div class="tab" onclick="switchTab(this,'t-acts','t-deals')">活動（${activities?.length||0}）</div></div>
+    <div id="t-deals"><table><thead><tr><th>商談名</th><th>金額</th><th>フェーズ</th></tr></thead><tbody>${dealRows}</tbody></table></div>
+    <div id="t-acts" style="display:none"><table><thead><tr><th>種別</th><th>件名</th><th>日時</th></tr></thead><tbody>${actRows}</tbody></table></div>
+    <div style="margin-top:16px;display:flex;gap:8px">
+      <button class="btn btn-primary btn-sm" onclick="showAddDeal('${customerId}')">＋ 商談追加</button>
+      <button class="btn btn-outline btn-sm" onclick="showAddActivity('${customerId}','','${esc(cust.company_name)}')">＋ 活動記録</button>
+    </div>`,
+  null, null);
+}
+
+function showQuickAdd() { showAddCustomer(); }
+
+// ── タブ切り替え ──────────────────────────────────────────
+function switchTab(el, showId, hideId) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById(showId).style.display = 'block';
+  document.getElementById(hideId).style.display = 'none';
+}
+
+// ── モーダル共通 ──────────────────────────────────────────
+function showModal(title, body, onConfirm, confirmLabel) {
+  const footer = onConfirm ? `
+    <button class="btn btn-outline" onclick="closeModal()">キャンセル</button>
+    <button class="btn btn-primary" id="modal-confirm">${confirmLabel||'保存'}</button>` :
+    `<button class="btn btn-outline" onclick="closeModal()">閉じる</button>`;
+  document.getElementById('modal-root').innerHTML = `
+    <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+      <div class="modal">
+        <div class="modal-header">
+          <div class="modal-title">${title}</div>
+          <button class="modal-close" onclick="closeModal()">✕</button>
+        </div>
+        <div class="modal-body">${body}</div>
+        <div class="modal-footer">${footer}</div>
+      </div>
+    </div>`;
+  if (onConfirm) {
+    document.getElementById('modal-confirm').onclick = onConfirm;
+  }
+}
+function closeModal() { document.getElementById('modal-root').innerHTML = ''; }
+
+// ── ユーティリティ ────────────────────────────────────────
+function setContent(html) { document.getElementById('content').innerHTML = html; }
+function val(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function fmtDate(d) { if (!d) return ''; try { return new Date(d).toLocaleDateString('ja-JP'); } catch(e){ return d; } }
+function phaseClass(p) { const m={PROSPECT:'prospect',APPROACH:'approach',PROPOSAL:'proposal',NEGOTIATION:'negotiation',CLOSED_WON:'won',CLOSED_LOST:'lost'}; return m[p]||''; }
+function statusLabel(s) { const m={PROSPECT:'見込み',ACTIVE:'取引中',INACTIVE:'休眠'}; return m[s]||s||''; }
+
+function showSuccess(msg) { _showToast(msg, 'success'); }
+function showError(msg) { _showToast(msg, 'error'); }
+function _showToast(msg, type) {
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = (type==='success' ? '✅ ' : '❌ ') + msg;
+  document.getElementById('toast-container').appendChild(t);
+  setTimeout(() => t.remove(), 4000);
+}
+
+// ── GASサーバー呼び出し ───────────────────────────────────
+function call(action, data) {
+  return new Promise((resolve, reject) => {
+    google.script.run
+      .withSuccessHandler(res => {
+        try {
+          const parsed = typeof res === 'string' ? JSON.parse(res) : res;
+          if (!parsed.success) { showError(parsed.error || 'エラーが発生しました'); resolve(null); return; }
+          resolve(parsed.data);
+        } catch(e) { reject(e); }
+      })
+      .withFailureHandler(err => { showError(err.message); reject(err); })
+      .serverAction(action, data || {});
+  });
+}
+</script>
+</body>
+</html>
