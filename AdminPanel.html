@@ -5,55 +5,64 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GAS CRM 管理画面</title>
 <style>
-:root { --primary:#1A56DB; --dark:#1F2937; --gray:#6B7280; --light:#F3F4F6; --border:#E5E7EB; --green:#0E9F6E; --red:#E02424; }
+:root {
+  --sidebar-bg: #1a1f36; --primary: #4f6ef7; --primary-dark: #3a55d4; --primary-light: #eef0fe;
+  --dark:#1F2937; --gray:#6B7280; --light:#F3F4F6; --border:#E5E7EB; --green:#0E9F6E; --red:#E02424;
+}
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'Segoe UI', Arial, sans-serif; background: #F9FAFB; color: var(--dark); font-size: 14px; }
-.header { background: var(--dark); color: white; padding: 16px 24px; display: flex; align-items: center; justify-content: space-between; }
-.header h1 { font-size: 18px; }
-.back-btn { color: #9CA3AF; text-decoration: none; font-size: 13px; }
-.container { max-width: 1000px; margin: 24px auto; padding: 0 24px; }
-.tabs { display: flex; border-bottom: 2px solid var(--border); margin-bottom: 24px; gap: 2px; }
-.tab { padding: 10px 20px; cursor: pointer; color: var(--gray); border-bottom: 2px solid transparent; font-weight: 500; margin-bottom: -2px; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #F0F2FA; color: var(--dark); font-size: 14px; }
+.header { background: var(--sidebar-bg); color: white; padding: 16px 28px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+.header h1 { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.header h1 .logo-accent { color: #4f6ef7; }
+.back-btn { color: #a0aec0; text-decoration: none; font-size: 13px; font-weight: 500; padding: 7px 14px; border: 1px solid rgba(255,255,255,0.15); border-radius: 8px; transition: all 0.15s; }
+.back-btn:hover { background: rgba(255,255,255,0.08); color: white; }
+.container { max-width: 1040px; margin: 28px auto; padding: 0 28px; }
+.tabs { display: flex; border-bottom: 2px solid var(--border); margin-bottom: 26px; gap: 2px; }
+.tab { padding: 11px 20px; cursor: pointer; color: var(--gray); border-bottom: 2px solid transparent; font-weight: 600; margin-bottom: -2px; font-size: 13px; transition: all 0.15s; }
+.tab:hover { color: var(--primary); }
 .tab.active { color: var(--primary); border-bottom-color: var(--primary); }
 .panel { display: none; }
 .panel.active { display: block; }
-.card { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); padding: 20px; margin-bottom: 16px; }
-.card h3 { font-size: 15px; margin-bottom: 16px; color: var(--dark); }
+.card { background: white; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); padding: 22px; margin-bottom: 18px; }
+.card h3 { font-size: 15px; font-weight: 700; margin-bottom: 16px; color: var(--dark); }
 .feature-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-.feature-item { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: var(--light); border-radius: 8px; }
-.feature-name { font-weight: 500; font-size: 14px; }
+.feature-item { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; background: #F8FAFC; border-radius: 10px; border: 1px solid var(--border); transition: border-color 0.15s; }
+.feature-item:hover { border-color: var(--primary); }
+.feature-name { font-weight: 600; font-size: 13px; }
 .feature-desc { font-size: 12px; color: var(--gray); margin-top: 2px; }
 .toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; }
 .toggle input { opacity: 0; width: 0; height: 0; }
 .slider { position: absolute; inset: 0; background: #D1D5DB; border-radius: 24px; cursor: pointer; transition: .2s; }
-.slider:before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .2s; }
+.slider:before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2); }
 input:checked + .slider { background: var(--primary); }
 input:checked + .slider:before { transform: translateX(20px); }
 .form-group { margin-bottom: 14px; }
-.form-label { display: block; font-size: 13px; font-weight: 500; color: var(--dark); margin-bottom: 6px; }
-.form-control { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; }
-.form-control:focus { outline: none; border-color: var(--primary); }
-.btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; font-weight: 500; }
+.form-label { display: block; font-size: 12px; font-weight: 700; color: var(--dark); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.form-control { width: 100%; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #FAFAFA; transition: all 0.15s; }
+.form-control:focus { outline: none; border-color: var(--primary); background: white; box-shadow: 0 0 0 3px rgba(79,110,247,0.1); }
+.btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 18px; border-radius: 8px; border: none; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.15s; }
 .btn-primary { background: var(--primary); color: white; }
+.btn-primary:hover { background: var(--primary-dark); }
 .btn-danger { background: #FEF2F2; color: var(--red); border: 1px solid #FECACA; }
 .btn-green { background: #F0FDF4; color: var(--green); border: 1px solid #BBF7D0; }
 table { width: 100%; border-collapse: collapse; }
-th { background: #F8FAFC; padding: 10px 14px; text-align: left; font-size: 12px; color: var(--gray); border-bottom: 1px solid var(--border); }
-td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+th { background: #F8FAFC; padding: 10px 14px; text-align: left; font-size: 11px; color: var(--gray); border-bottom: 1px solid var(--border); text-transform: uppercase; letter-spacing: 0.04em; font-weight: 600; }
+td { padding: 13px 14px; border-bottom: 1px solid #F3F4F6; font-size: 13px; }
+tr:hover td { background: #FAFBFF; }
+.badge { display: inline-block; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 700; }
 .badge-admin { background: #FEF3C7; color: #92400E; }
 .badge-manager { background: #DBEAFE; color: #1E40AF; }
 .badge-sales { background: #D1FAE5; color: #065F46; }
-#toast { position: fixed; top: 20px; right: 20px; padding: 12px 18px; border-radius: 8px; color: white; font-size: 14px; z-index: 999; display: none; }
+#toast { position: fixed; top: 20px; right: 20px; padding: 13px 18px; border-radius: 10px; color: white; font-size: 13px; font-weight: 500; z-index: 999; display: none; box-shadow: 0 6px 20px rgba(0,0,0,0.18); }
 .toast-success { background: var(--green); }
 .toast-error { background: var(--red); }
-.section-divider { font-size: 12px; color: var(--gray); text-transform: uppercase; letter-spacing: 0.05em; margin: 20px 0 10px; font-weight: 600; }
+.section-divider { font-size: 11px; color: var(--gray); text-transform: uppercase; letter-spacing: 0.08em; margin: 22px 0 10px; font-weight: 700; }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <h1>⚙️ GAS CRM 管理画面</h1>
+  <h1><span class="logo-accent">◈</span> GAS CRM <span style="font-size:13px;font-weight:400;color:#a0aec0;margin-left:6px">管理画面</span></h1>
   <a href="#" class="back-btn" onclick="goMain(event)">← メイン画面に戻る</a>
 </div>
 

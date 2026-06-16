@@ -53,29 +53,115 @@ function _generateAndSendReport(type) {
 }
 
 function getKpiSummary() {
-  const customers = getSheetData('👥 Customers');
-  const deals = getSheetData('💼 Deals');
-  const activities = getSheetData('📝 Activities');
+  return wrapAction(() => {
+    const customers = getSheetData('👥 Customers');
+    const deals = getSheetData('💼 Deals');
+    const activities = getSheetData('📝 Activities');
 
-  const today = new Date();
-  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const today = new Date();
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+    const lastMonthStart = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0, 23, 59, 59);
 
-  const activeDeals = deals.filter(d => d.phase !== 'CLOSED_WON' && d.phase !== 'CLOSED_LOST');
-  const wonThisMonth = deals.filter(d => {
-    if (d.phase !== 'CLOSED_WON') return false;
-    const ud = new Date(d.updated_at);
-    return ud >= monthStart;
+    const activeDeals = deals.filter(d => d.phase !== 'CLOSED_WON' && d.phase !== 'CLOSED_LOST');
+    const wonThisMonth = deals.filter(d => {
+      if (d.phase !== 'CLOSED_WON') return false;
+      const ud = new Date(d.updated_at);
+      return ud >= monthStart;
+    });
+    const wonLastMonth = deals.filter(d => {
+      if (d.phase !== 'CLOSED_WON') return false;
+      const ud = new Date(d.updated_at);
+      return ud >= lastMonthStart && ud <= lastMonthEnd;
+    });
+    const activitiesThisMonth = activities.filter(a => new Date(a.activity_date) >= monthStart);
+
+    const wonAmountThisMonth = wonThisMonth.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+    const wonAmountLastMonth = wonLastMonth.reduce((s, d) => s + (Number(d.amount) || 0), 0);
+    const revenueGrowthRate = wonAmountLastMonth > 0
+      ? Math.round((wonAmountThisMonth - wonAmountLastMonth) / wonAmountLastMonth * 100)
+      : null;
+
+    const totalDeals = deals.length;
+    const wonDeals = deals.filter(d => d.phase === 'CLOSED_WON').length;
+    const closedDeals = deals.filter(d => d.phase === 'CLOSED_WON' || d.phase === 'CLOSED_LOST').length;
+    const winRate = closedDeals > 0 ? Math.round(wonDeals / closedDeals * 100) : 0;
+
+    return successResponse({
+      totalCustomers: customers.length,
+      activeDeals: activeDeals.length,
+      pipelineAmount: activeDeals.reduce((s, d) => s + (Number(d.amount) || 0), 0),
+      weightedAmount: activeDeals.reduce((s, d) => s + (Number(d.weighted_amount) || 0), 0),
+      wonThisMonth: wonThisMonth.length,
+      wonAmountThisMonth,
+      wonAmountLastMonth,
+      revenueGrowthRate,
+      activitiesThisMonth: activitiesThisMonth.length,
+      winRate,
+      totalDeals,
+    });
   });
-  const activitiesThisMonth = activities.filter(a => new Date(a.activity_date) >= monthStart);
+}
 
-  return successResponse({
-    totalCustomers: customers.length,
-    activeDeals: activeDeals.length,
-    pipelineAmount: activeDeals.reduce((s, d) => s + (Number(d.amount) || 0), 0),
-    weightedAmount: activeDeals.reduce((s, d) => s + (Number(d.weighted_amount) || 0), 0),
-    wonThisMonth: wonThisMonth.length,
-    wonAmountThisMonth: wonThisMonth.reduce((s, d) => s + (Number(d.amount) || 0), 0),
-    activitiesThisMonth: activitiesThisMonth.length,
+/**
+ * 過去N月の月別売上時系列データ（グラフ用）
+ */
+function getSalesTrend(months) {
+  return wrapAction(() => {
+    const n = Math.max(1, Math.min(Number(months) || 6, 24));
+    const deals = getSheetData('💼 Deals');
+    const today = new Date();
+    const result = [];
+
+    for (let i = n - 1; i >= 0; i--) {
+      const start = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const end   = new Date(today.getFullYear(), today.getMonth() - i + 1, 0, 23, 59, 59);
+      const label = Utilities.formatDate(start, 'Asia/Tokyo', 'yyyy/MM');
+
+      const wonDeals = deals.filter(d => {
+        if (d.phase !== 'CLOSED_WON') return false;
+        const ud = new Date(d.updated_at);
+        return ud >= start && ud <= end;
+      });
+      result.push({
+        month: label,
+        count: wonDeals.length,
+        amount: wonDeals.reduce((s, d) => s + (Number(d.amount) || 0), 0),
+      });
+    }
+    return successResponse(result);
+  });
+}
+
+/**
+ * 担当者別件数・売上ランキング
+ */
+function getTeamPerformance() {
+  return wrapAction(() => {
+    const deals = getSheetData('💼 Deals');
+    const today = new Date();
+    const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    const byUser = {};
+    deals.forEach(d => {
+      const user = d.assigned_user || 'unknown';
+      if (!byUser[user]) {
+        byUser[user] = { assigned_user: user, totalDeals: 0, wonDeals: 0, wonAmount: 0, wonThisMonth: 0, wonAmountThisMonth: 0 };
+      }
+      byUser[user].totalDeals++;
+      if (d.phase === 'CLOSED_WON') {
+        byUser[user].wonDeals++;
+        byUser[user].wonAmount += Number(d.amount) || 0;
+        const ud = new Date(d.updated_at);
+        if (ud >= monthStart) {
+          byUser[user].wonThisMonth++;
+          byUser[user].wonAmountThisMonth += Number(d.amount) || 0;
+        }
+      }
+    });
+
+    const ranking = Object.values(byUser).sort((a, b) => b.wonAmountThisMonth - a.wonAmountThisMonth);
+    return successResponse(ranking);
   });
 }
 

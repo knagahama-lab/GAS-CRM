@@ -95,8 +95,16 @@ function _dispatchAction(action, data) {
     case 'sendEmail':         return sendEmail(data);
     case 'getEmailHistory':   return getEmailHistory(data.customer_id);
 
+    // ── 顧客管理（拡張） ──────────────────────────
+    case 'getCustomersFiltered': return getCustomersFiltered(data);
+
+    // ── 商談管理（拡張） ──────────────────────────
+    case 'getDealsFiltered':  return getDealsFiltered(data);
+
     // ── レポート ──────────────────────────────
     case 'getKpiSummary':     return getKpiSummary();
+    case 'getSalesTrend':     return getSalesTrend(data.months || 6);
+    case 'getTeamPerformance':return getTeamPerformance();
 
     // ── ユーザー・マスタ ──────────────────────
     case 'getCurrentUser':    return successResponse(getCurrentUser());
@@ -107,7 +115,7 @@ function _dispatchAction(action, data) {
 
     // ── 設定管理 ──────────────────────────────
     case 'getAllSettings':    return successResponse(getAllSettings());
-    case 'setFeature':        return (setFeature(data.key, data.value), successResponse({ key: data.key }));
+    case 'setFeature':        return setFeature(data.key, data.value);
 
     // ── システム ──────────────────────────────
     case 'getTriggerStatus':  return getTriggerStatus();

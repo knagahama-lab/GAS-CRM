@@ -118,3 +118,73 @@ function successResponse(data) {
 function errorResponse(message) {
   return JSON.stringify({ success: false, error: message });
 }
+
+// ── バリデーション・サニタイズ ────────────────────────────
+
+/**
+ * 必須フィールド検証。不足時は {success:false, error:'...'} を返す
+ */
+function validateRequired(obj, fields) {
+  const missing = fields.filter(f => obj[f] === undefined || obj[f] === null || String(obj[f]).trim() === '');
+  if (missing.length > 0) {
+    return { success: false, error: `必須項目が未入力です: ${missing.join(', ')}` };
+  }
+  return null;
+}
+
+/**
+ * 文字列トリム＋XSS対策(<>&"' エスケープ)
+ */
+function sanitizeString(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .trim()
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
+}
+
+/**
+ * try/catchラッパー。エラー時は {success:false, error:e.message} を返す
+ */
+function wrapAction(fn) {
+  try {
+    return fn();
+  } catch (e) {
+    logError('wrapAction caught error', e);
+    return errorResponse(e.message);
+  }
+}
+
+/**
+ * 配列ソートヘルパー
+ */
+function sortBy(arr, key, asc) {
+  if (!Array.isArray(arr)) return arr;
+  return arr.slice().sort((a, b) => {
+    const va = a[key] !== undefined ? a[key] : '';
+    const vb = b[key] !== undefined ? b[key] : '';
+    let cmp = 0;
+    if (typeof va === 'number' && typeof vb === 'number') {
+      cmp = va - vb;
+    } else {
+      cmp = String(va).localeCompare(String(vb), 'ja');
+    }
+    return asc === false ? -cmp : cmp;
+  });
+}
+
+/**
+ * ページネーションヘルパー
+ */
+function paginate(arr, page, pageSize) {
+  if (!Array.isArray(arr)) return { items: [], total: 0, page: 1, pageSize: 20, totalPages: 0 };
+  const p = Math.max(1, Number(page) || 1);
+  const ps = Math.max(1, Number(pageSize) || 20);
+  const total = arr.length;
+  const totalPages = Math.ceil(total / ps);
+  const items = arr.slice((p - 1) * ps, p * ps);
+  return { items, total, page: p, pageSize: ps, totalPages };
+}
