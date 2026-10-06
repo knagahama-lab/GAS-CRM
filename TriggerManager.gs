@@ -29,6 +29,13 @@ function setupTriggers() {
   ScriptApp.newTrigger('monthlyReportTrigger')
     .timeBased().onMonthDay(1).atHour(9).create();
 
+  // T6: 議事録AI - 録音フォルダ監視（デフォルト10分ごと。未設定時は関数内で何もしない）
+  const meetingInterval = Number(getSetting('MEETING_SCAN_INTERVAL', 10));
+  if (meetingInterval > 0) {
+    ScriptApp.newTrigger('scanRecordingFolderTrigger')
+      .timeBased().everyMinutes(meetingInterval).create();
+  }
+
   logInfo('トリガー設定完了');
 }
 

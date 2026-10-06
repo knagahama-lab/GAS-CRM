@@ -257,6 +257,7 @@ textarea.form-control { min-height: 80px; resize: vertical; }
     <button class="nav-item" id="nav-deals" onclick="navigate('deals')"><span class="icon">💼</span>商談管理</button>
     <button class="nav-item" id="nav-kanban" onclick="navigate('kanban')"><span class="icon">📋</span>カンバン</button>
     <button class="nav-item" id="nav-activities" onclick="navigate('activities')"><span class="icon">📝</span>活動ログ</button>
+    <button class="nav-item" id="nav-meetings" onclick="navigate('meetings')"><span class="icon">🎙️</span>議事録AI</button>
   </div>
   <div class="nav-section" id="nav-admin-section" style="display:none">
     <div class="nav-label">管理</div>
@@ -289,6 +290,7 @@ const state = {
   customers: [],
   deals: [],
   activities: [],
+  meetings: [],
 };
 
 // ── 初期化 ────────────────────────────────────────────────
@@ -309,6 +311,7 @@ window.onload = async () => {
     if (!boolSetting(s, 'FEATURE_DEALS'))     hide('nav-deals');
     if (!boolSetting(s, 'FEATURE_KANBAN'))    hide('nav-kanban');
     if (!boolSetting(s, 'FEATURE_ACTIVITIES'))hide('nav-activities');
+    if (!boolSetting(s, 'FEATURE_MEETINGS')) hide('nav-meetings');
 
     navigate('dashboard');
   } catch(e) {
@@ -337,7 +340,7 @@ function navigate(page) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const navEl = document.getElementById('nav-' + page);
   if (navEl) navEl.classList.add('active');
-  const titles = { dashboard:'ダッシュボード', customers:'顧客管理', deals:'商談管理', kanban:'カンバンボード', activities:'活動ログ', admin:'管理画面' };
+  const titles = { dashboard:'ダッシュボード', customers:'顧客管理', deals:'商談管理', kanban:'カンバンボード', activities:'活動ログ', meetings:'議事録AI', admin:'管理画面' };
   document.getElementById('page-title').textContent = titles[page] || page;
   closeSidebar();
 
@@ -347,6 +350,7 @@ function navigate(page) {
     case 'deals':      renderDeals(); break;
     case 'kanban':     renderKanban(); break;
     case 'activities': renderActivities(); break;
+    case 'meetings':   renderMeetings(); break;
     case 'admin':
       google.script.run
         .withSuccessHandler(function(url) { window.open(url + '?page=admin', '_top'); })
@@ -632,6 +636,312 @@ async function renderActivities() {
         <tbody>${pendingRows}</tbody></table></div>
       </div>
     </div>`);
+}
+
+// ── 議事録AI ──────────────────────────────────────────────
+const meetingStatusMeta = {
+  PROCESSING: { label: '処理中', bg: '#DBEAFE', fg: '#1E40AF', icon: '⏳' },
+  REVIEW:     { label: '要確認', bg: '#FEF3C7', fg: '#92400E', icon: '📋' },
+  LINKED:     { label: '連携済み', bg: '#D1FAE5', fg: '#065F46', icon: '✓' },
+  ERROR:      { label: 'エラー', bg: '#FEE2E2', fg: '#991B1B', icon: '⚠️' },
+  UNLINKED:   { label: '保留', bg: '#F3F4F6', fg: '#6B7280', icon: '—' },
+};
+function meetingBadge(status) {
+  const m = meetingStatusMeta[status] || meetingStatusMeta.UNLINKED;
+  return `<span class="badge" style="background:${m.bg};color:${m.fg}">${m.icon} ${m.label}</span>`;
+}
+
+async function renderMeetings() {
+  setContent(skeletonTable(6));
+  const data = await call('getAllMeetings');
+  state.meetings = data || [];
+
+  const rows = state.meetings.length ? state.meetings.map(m => `
+    <tr style="cursor:pointer" onclick="openMeeting('${m.meeting_id}')">
+      <td><strong>${esc(m.title)}</strong><div style="font-size:11px;color:var(--gray)">${m.source==='FOLDER'?'📁 フォルダ取込':'🎙️ ブラウザ録音'}</div></td>
+      <td>${meetingBadge(m.status)}</td>
+      <td>${esc(m.company_name_guess || '—')}</td>
+      <td>${esc((m.summary||'').slice(0,40))}${(m.summary||'').length>40?'…':''}</td>
+      <td>${fmtDate(m.meeting_date)}</td>
+      <td class="td-actions" onclick="event.stopPropagation()">
+        ${m.status==='ERROR' ? `<button class="btn btn-outline btn-sm" onclick="retryMeeting('${m.meeting_id}')">再実行</button>` : ''}
+        <button class="btn btn-outline btn-sm" onclick="removeMeeting('${m.meeting_id}')">削除</button>
+      </td>
+    </tr>`).join('')
+    : `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🎙️</div><div class="empty-title">議事録がまだありません</div><div class="empty-desc">商談を録音するか、Driveフォルダに音声ファイルを置いてください</div></div></td></tr>`;
+
+  const isAdmin = state.initData?.isAdmin;
+  setContent(`
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-bottom:14px">
+      ${isAdmin ? `<button class="btn btn-outline" onclick="runFolderScan()">📁 フォルダ取込を今すぐ実行</button>` : ''}
+      <button class="btn btn-primary" onclick="showRecordMeetingModal()">🎙️ 録音して文字起こし</button>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">🎙️ 議事録一覧</div>
+        <span style="font-size:12px;color:var(--gray)">${state.meetings.length} 件</span>
+      </div>
+      <div class="card-body"><table><thead><tr><th>タイトル</th><th>状態</th><th>先方会社（AI推定）</th><th>要約</th><th>商談日時</th><th>操作</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    </div>`);
+}
+
+async function runFolderScan() {
+  showInfo('フォルダを確認しています…');
+  const res = await call('scanRecordingFolder');
+  if (!res) return;
+  showSuccess(`取込完了: ${res.processed}件処理（失敗${res.failed}件）`);
+  renderMeetings();
+}
+
+async function retryMeeting(meetingId) {
+  showInfo('再解析しています…');
+  const res = await call('retryMeetingProcessing', { meeting_id: meetingId });
+  if (!res) return;
+  showSuccess('再解析が完了しました');
+  renderMeetings();
+}
+
+async function removeMeeting(meetingId) {
+  if (!confirm('この議事録を削除しますか？（音声ファイルはDriveに残ります）')) return;
+  const res = await call('deleteMeeting', { meeting_id: meetingId });
+  if (!res) return;
+  showSuccess('削除しました');
+  renderMeetings();
+}
+
+async function openMeeting(meetingId) {
+  const res = await call('getMeeting', { meeting_id: meetingId });
+  if (!res) return;
+  if (res.meeting.status === 'REVIEW' || res.meeting.status === 'UNLINKED') {
+    showMeetingReviewModal(res.meeting, res.candidates);
+  } else {
+    showMeetingDetailModal(res.meeting);
+  }
+}
+
+function showMeetingDetailModal(m) {
+  showModal(`🎙️ ${esc(m.title)}`, `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;padding:14px;background:#F8FAFC;border-radius:8px">
+      <div><div style="font-size:11px;color:#6B7280;font-weight:600;text-transform:uppercase">状態</div><div style="margin-top:2px">${meetingBadge(m.status)}</div></div>
+      <div><div style="font-size:11px;color:#6B7280;font-weight:600;text-transform:uppercase">商談日時</div><div style="margin-top:2px">${fmtDate(m.meeting_date)}</div></div>
+      <div><div style="font-size:11px;color:#6B7280;font-weight:600;text-transform:uppercase">顧客ID</div><div style="margin-top:2px">${esc(m.customer_id||'—')}</div></div>
+      <div><div style="font-size:11px;color:#6B7280;font-weight:600;text-transform:uppercase">商談ID</div><div style="margin-top:2px">${esc(m.deal_id||'—')}</div></div>
+    </div>
+    ${m.status==='ERROR' ? `<div style="padding:10px 14px;background:#FEF2F2;color:#991B1B;border-radius:8px;margin-bottom:14px;font-size:13px">${esc(m.error_message||'処理に失敗しました')}</div>` : ''}
+    <div class="form-group"><label class="form-label">要約</label><div style="padding:10px 12px;background:#FAFAFA;border-radius:8px;font-size:13px;line-height:1.6">${esc(m.summary||'—')}</div></div>
+    <div class="form-group"><label class="form-label">文字起こし全文</label>
+      <pre style="white-space:pre-wrap;font-family:inherit;max-height:280px;overflow-y:auto;background:#FAFAFA;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12.5px;line-height:1.7">${esc(m.transcript||'（文字起こしがありません）')}</pre>
+    </div>`, null, null);
+}
+
+// ── 録音モーダル（ブラウザでマイク録音） ───────────────────
+let _mr = { recorder: null, chunks: [], stream: null, startTs: 0, timerId: null };
+
+function showRecordMeetingModal() {
+  const today = new Date().toISOString().split('T')[0];
+  showModal('🎙️ 商談を録音', `
+    <div class="form-group"><label class="form-label">タイトル</label><input class="form-control" id="rec-title" placeholder="例: ○○株式会社様 定例商談" value="商談録音 ${today}"></div>
+    <div style="text-align:center;padding:24px 0">
+      <div id="rec-timer" style="font-size:36px;font-weight:800;color:var(--primary);margin-bottom:16px">00:00</div>
+      <div id="rec-status" style="color:var(--gray);font-size:13px;margin-bottom:18px">マイクへのアクセスを許可し、録音を開始してください</div>
+      <button class="btn btn-primary" id="rec-start-btn" onclick="startRecording()">● 録音開始</button>
+      <button class="btn btn-danger" id="rec-stop-btn" style="display:none" onclick="stopRecordingAndUpload()">■ 停止してAI解析</button>
+    </div>
+    <p style="font-size:12px;color:var(--gray)">※ 録音データはGoogleドライブに保存され、Gemini AIで文字起こし・要約されます。長時間の録音は分割して録音してください（目安30分以内）。</p>
+  `, null, null);
+}
+
+async function startRecording() {
+  try {
+    _mr.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    showError('マイクにアクセスできませんでした: ' + e.message);
+    return;
+  }
+  _mr.chunks = [];
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
+  _mr.recorder = new MediaRecorder(_mr.stream, { mimeType });
+  _mr.recorder.ondataavailable = e => { if (e.data && e.data.size > 0) _mr.chunks.push(e.data); };
+  _mr.recorder.start();
+  _mr.startTs = Date.now();
+  _mr.timerId = setInterval(updateRecTimer, 500);
+
+  document.getElementById('rec-start-btn').style.display = 'none';
+  document.getElementById('rec-stop-btn').style.display = 'inline-flex';
+  document.getElementById('rec-status').textContent = '● 録音中…';
+}
+
+function updateRecTimer() {
+  const el = document.getElementById('rec-timer');
+  if (!el) return;
+  const sec = Math.floor((Date.now() - _mr.startTs) / 1000);
+  const mm = String(Math.floor(sec / 60)).padStart(2, '0');
+  const ss = String(sec % 60).padStart(2, '0');
+  el.textContent = `${mm}:${ss}`;
+}
+
+function stopRecordingAndUpload() {
+  if (!_mr.recorder) return;
+  clearInterval(_mr.timerId);
+  const durationSec = Math.floor((Date.now() - _mr.startTs) / 1000);
+  const title = val('rec-title');
+
+  document.getElementById('rec-status').textContent = '処理中…';
+  document.getElementById('rec-stop-btn').disabled = true;
+
+  _mr.recorder.onstop = async () => {
+    _mr.stream.getTracks().forEach(t => t.stop());
+    const blob = new Blob(_mr.chunks, { type: _mr.recorder.mimeType || 'audio/webm' });
+
+    document.getElementById('modal-root').innerHTML = `
+      <div class="modal-overlay"><div class="modal" style="width:420px">
+        <div class="modal-body" style="text-align:center;padding:40px 26px">
+          <div class="spinner" style="margin:0 auto 18px"></div>
+          <div style="font-weight:700;margin-bottom:6px">AIが解析しています…</div>
+          <div style="font-size:12px;color:var(--gray)">文字起こし・要約・顧客紐付け候補の抽出を行っています。録音時間に応じて数十秒〜数分かかります。</div>
+        </div>
+      </div></div>`;
+
+    const base64Data = await blobToBase64(blob);
+    const res = await call('uploadMeetingRecording', {
+      base64Data, mimeType: blob.type || 'audio/webm',
+      filename: `${title || 'meeting'}.webm`, title,
+      duration_sec: durationSec,
+    });
+    if (!res) { closeModal(); return; }
+    showMeetingReviewModal(res.meeting, res.candidates);
+    renderMeetings();
+  };
+  _mr.recorder.stop();
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result).split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+// ── 紐付け確認モーダル（転記案の確認） ─────────────────────
+async function showMeetingReviewModal(m, candidates) {
+  state.meetingCustomersCache = state.meetingCustomersCache || await call('getAllCustomers');
+  const allCustomers = state.meetingCustomersCache || [];
+  candidates = candidates || [];
+
+  const candidateOpts = candidates.map(c =>
+    `<option value="${c.customer_id}" data-deal="${c.deal_id}" data-dealname="${esc(c.deal_name)}">推奨 ${c.score}%: ${esc(c.company_name)}${c.deal_name?' / '+esc(c.deal_name):''}（${esc(c.reason)}）</option>`).join('');
+  const otherOpts = allCustomers
+    .filter(c => !candidates.some(cand => cand.customer_id === c.customer_id))
+    .map(c => `<option value="${c.customer_id}">${esc(c.company_name)}</option>`).join('');
+
+  const actTypeLabel = { CALL:'電話', EMAIL:'メール', VISIT:'訪問', MEETING:'商談', DEMO:'デモ', OTHER:'その他' };
+  const actTypeOpts = Object.entries(actTypeLabel).map(([k,v]) =>
+    `<option value="${k}" ${k===(m.extracted_json ? JSON.parse(m.extracted_json).activity_type_guess : 'MEETING')?'selected':''}>${v}</option>`).join('');
+
+  showModal(`📋 転記案の確認: ${esc(m.title)}`, `
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab(this,'mr-tab-summary','mr-tab-transcript')">確認・紐付け</div>
+      <div class="tab" onclick="switchTab(this,'mr-tab-transcript','mr-tab-summary')">文字起こし全文</div>
+    </div>
+    <div id="mr-tab-summary">
+      <div style="padding:10px 14px;background:#EFF6FF;color:#1E40AF;border-radius:8px;margin-bottom:14px;font-size:12.5px">
+        抽出できない項目は空欄のままです。内容を確認し、必要に応じて修正してから反映してください。
+      </div>
+      <div class="form-group"><label class="form-label">要約（活動ログに記録されます）</label>
+        <textarea class="form-control" id="mr-summary" rows="3">${esc(m.summary||'')}</textarea></div>
+
+      <div class="form-group"><label class="form-label">顧客の紐付け</label>
+        <select class="form-control" id="mr-customer" onchange="onMeetingCustomerChange()">
+          <option value="">— 選択してください —</option>
+          ${candidateOpts}
+          ${otherOpts}
+          <option value="NEW">＋ 新規顧客として登録（AI推定: ${esc(m.company_name_guess||'不明')}）</option>
+        </select>
+      </div>
+      <div class="form-group" id="mr-new-customer-fields" style="display:none">
+        <label class="form-label">新規顧客名</label>
+        <input class="form-control" id="mr-new-customer-name" value="${esc(m.company_name_guess||'')}">
+      </div>
+
+      <div class="form-group"><label class="form-label">商談の紐付け</label>
+        <select class="form-control" id="mr-deal">
+          <option value="">紐付けない</option>
+          <option value="NEW" selected>＋ 新規商談として登録（AI推定: ${esc(m.project_name_guess||m.title)}）</option>
+        </select>
+      </div>
+      <div class="form-group" id="mr-new-deal-fields">
+        <label class="form-label">新規商談名</label>
+        <input class="form-control" id="mr-new-deal-name" value="${esc(m.project_name_guess||m.title)}">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">活動種別</label><select class="form-control" id="mr-acttype">${actTypeOpts}</select></div>
+        <div class="form-group"><label class="form-label">金額（円・AI推定）</label><input class="form-control" id="mr-amount" type="number" value="${esc(m.amount_guess||'')}"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label class="form-label">次回アクション</label><input class="form-control" id="mr-next" value="${esc(m.next_action||'')}"></div>
+        <div class="form-group"><label class="form-label">次回予定日</label><input class="form-control" id="mr-nextdate" type="date" value="${esc(m.next_action_date||'')}"></div>
+      </div>
+    </div>
+    <div id="mr-tab-transcript" style="display:none">
+      <pre style="white-space:pre-wrap;font-family:inherit;max-height:360px;overflow-y:auto;background:#FAFAFA;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12.5px;line-height:1.7">${esc(m.transcript||'（文字起こしがありません）')}</pre>
+    </div>`,
+  async () => {
+    const custSel = val('mr-customer');
+    if (!custSel) return showError('顧客を選択してください（分からない場合は「新規顧客として登録」を選択）');
+    const dealSel = document.getElementById('mr-deal').value;
+
+    const data = {
+      meeting_id: m.meeting_id,
+      customer_id: custSel,
+      new_customer_name: val('mr-new-customer-name'),
+      deal_id: dealSel,
+      new_deal_name: val('mr-new-deal-name'),
+      activity_type: val('mr-acttype'),
+      amount: val('mr-amount'),
+      summary: val('mr-summary'),
+      next_action: val('mr-next'),
+      next_action_date: val('mr-nextdate'),
+    };
+    const res = await call('confirmMeetingLink', data);
+    if (!res) return;
+    closeModal();
+    showSuccess('CRMに反映しました');
+    renderMeetings();
+  }, 'CRMへ反映');
+
+  // 初期状態：AI推奨の最上位候補があれば自動選択
+  if (candidates.length) {
+    document.getElementById('mr-customer').value = candidates[0].customer_id;
+    onMeetingCustomerChange();
+  }
+}
+
+async function onMeetingCustomerChange() {
+  const custId = val('mr-customer');
+  document.getElementById('mr-new-customer-fields').style.display = custId === 'NEW' ? 'block' : 'none';
+
+  const dealSelect = document.getElementById('mr-deal');
+  const newDealFields = document.getElementById('mr-new-deal-fields');
+  const newDealNameInput = document.getElementById('mr-new-deal-name');
+  if (!custId || custId === 'NEW') {
+    dealSelect.innerHTML = `<option value="">紐付けない</option><option value="NEW" selected>＋ 新規商談として登録</option>`;
+    newDealFields.style.display = 'block';
+    return;
+  }
+  const custOption = document.querySelector('#mr-customer option:checked');
+  const suggestedDealId = custOption?.dataset.deal || '';
+  const suggestedDealName = custOption?.dataset.dealname || '';
+
+  const deals = await call('getDealsByCustomer', { customer_id: custId });
+  const existingOpts = (deals||[]).map(d => `<option value="${d.deal_id}" ${d.deal_id===suggestedDealId?'selected':''}>${esc(d.deal_name)}（${esc(d.phase)}）</option>`).join('');
+  dealSelect.innerHTML = `<option value="">紐付けない</option>${existingOpts}<option value="NEW" ${!suggestedDealId?'selected':''}>＋ 新規商談として登録</option>`;
+  if (!existingOpts) newDealNameInput.value = suggestedDealName || newDealNameInput.value;
+  newDealFields.style.display = dealSelect.value === 'NEW' ? 'block' : 'none';
+  dealSelect.onchange = () => { newDealFields.style.display = dealSelect.value === 'NEW' ? 'block' : 'none'; };
 }
 
 // ── モーダル: 顧客追加 ────────────────────────────────────

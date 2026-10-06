@@ -91,6 +91,18 @@ function _dispatchAction(action, data) {
     case 'getPendingNextActions':   return getPendingNextActions(userEmail);
     case 'getActivityStats':        return getActivityStats(userEmail);
 
+    // ── 議事録AI（録音→文字起こし→CRM反映） ─────────────────
+    case 'uploadMeetingRecording': return uploadMeetingRecording(data);
+    case 'getAllMeetings':         return getAllMeetings(userEmail);
+    case 'getMeeting':             return getMeeting(data.meeting_id);
+    case 'confirmMeetingLink':     return confirmMeetingLink(data);
+    case 'skipMeetingLink':        return skipMeetingLink(data.meeting_id);
+    case 'retryMeetingProcessing': return retryMeetingProcessing(data.meeting_id);
+    case 'deleteMeeting':          return deleteMeeting(data.meeting_id);
+    case 'scanRecordingFolder':    return scanRecordingFolder();
+    case 'setGeminiApiKey':        return setGeminiApiKey(data.apiKey);
+    case 'hasGeminiApiKey':        return hasGeminiApiKey();
+
     // ── メール ────────────────────────────────
     case 'sendEmail':         return sendEmail(data);
     case 'getEmailHistory':   return getEmailHistory(data.customer_id);

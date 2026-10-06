@@ -71,6 +71,7 @@ tr:hover td { background: #FAFBFF; }
     <div class="tab active" onclick="switchTab('features')">🔧 機能設定</div>
     <div class="tab" onclick="switchTab('users')">👥 ユーザー管理</div>
     <div class="tab" onclick="switchTab('report')">📊 レポート設定</div>
+    <div class="tab" onclick="switchTab('meetings')">🎙️ 議事録AI</div>
     <div class="tab" onclick="switchTab('system')">🖥️ システム</div>
   </div>
 
@@ -152,6 +153,47 @@ tr:hover td { background: #FAFBFF; }
     </div>
   </div>
 
+  <!-- 議事録AI -->
+  <div class="panel" id="panel-meetings">
+    <div class="card">
+      <h3>🎙️ 議事録AI設定</h3>
+      <p style="font-size:13px;color:#6B7280;margin-bottom:16px">
+        商談の録音データをAI（Gemini）が文字起こしし、CRMの顧客・商談に自動で紐付け候補を提示します。
+      </p>
+      <div class="form-group">
+        <label class="form-label">Gemini APIキー</label>
+        <div style="display:flex;gap:8px">
+          <input class="form-control" id="m-apikey" type="password" placeholder="AIza...">
+          <button class="btn btn-primary" style="white-space:nowrap" onclick="saveGeminiApiKey()">💾 保存</button>
+        </div>
+        <div id="m-apikey-status" style="font-size:12px;color:#6B7280;margin-top:6px">確認中...</div>
+        <div style="font-size:12px;color:#6B7280;margin-top:4px">
+          APIキーは <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">Google AI Studio</a> で発行できます。保存後はスクリプトのプロパティに安全に保管され、画面上には表示されません。
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">使用するGeminiモデル</label>
+        <input class="form-control" id="m-model" placeholder="gemini-2.5-flash">
+      </div>
+      <div class="form-group">
+        <label class="form-label">録音データ監視フォルダ（Google Drive フォルダID）</label>
+        <input class="form-control" id="m-folder" placeholder="空欄の場合は「GAS-CRM 商談録音」フォルダを自動作成">
+        <div style="font-size:12px;color:#6B7280;margin-top:4px">
+          このフォルダに音声ファイル（mp3/wav/m4a/webm等）を置くと、定期的に自動で文字起こし・紐付け候補が作成されます。
+        </div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">フォルダ監視の実行間隔（分）</label>
+        <input class="form-control" id="m-interval" type="number" min="5" max="60" value="10">
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="saveMeetingSettings()">💾 設定を保存</button>
+        <button class="btn" style="background:#EFF6FF;color:var(--primary);border:1px solid #BFDBFE" onclick="runFolderScanNow()">📁 フォルダ取込を今すぐ実行</button>
+      </div>
+      <div style="font-size:12px;color:#6B7280;margin-top:8px">設定変更後は「システム」タブの「トリガー再設定」を実行すると、監視間隔が反映されます。</div>
+    </div>
+  </div>
+
   <!-- システム -->
   <div class="panel" id="panel-system">
     <div class="card">
@@ -211,6 +253,7 @@ const FEATURE_DEFS = {
     { key:'FEATURE_KANBAN',  name:'カンバンボード',  desc:'フェーズ別商談のビジュアル管理' },
     { key:'FEATURE_SEARCH',  name:'グローバル検索',  desc:'顧客・商談・活動を横断検索' },
     { key:'FEATURE_DEDUP',   name:'重複チェック',    desc:'顧客登録時の重複自動検出' },
+    { key:'FEATURE_MEETINGS',name:'議事録AI',        desc:'録音の文字起こし・CRM自動紐付け' },
   ],
 };
 
@@ -395,7 +438,7 @@ function runEmailScan() {
 // ── タブ ──
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t,i) => {
-    const names = ['features','users','report','system'];
+    const names = ['features','users','report','meetings','system'];
     t.classList.toggle('active', names[i] === name);
   });
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -408,6 +451,68 @@ function switchTab(name) {
     document.getElementById('s-reminder').value = settings.REMINDER_DAYS_BEFORE || '3';
     document.getElementById('s-email-interval').value = settings.EMAIL_SCAN_INTERVAL || '15';
   }
+  if (name === 'meetings') {
+    document.getElementById('m-model').value = settings.GEMINI_MODEL || 'gemini-2.5-flash';
+    document.getElementById('m-folder').value = settings.RECORDING_FOLDER_ID || '';
+    document.getElementById('m-interval').value = settings.MEETING_SCAN_INTERVAL || '10';
+    refreshApiKeyStatus();
+  }
+}
+
+// ── 議事録AI設定 ──
+function refreshApiKeyStatus() {
+  google.script.run
+    .withSuccessHandler(res => {
+      const parsed = typeof res === 'string' ? JSON.parse(res) : res;
+      const hasKey = parsed.success && parsed.data.hasKey;
+      document.getElementById('m-apikey-status').textContent = hasKey
+        ? '✅ APIキーは設定済みです（変更する場合のみ再入力してください）'
+        : '⚠️ APIキーが未設定です。議事録AI機能を使うには設定してください。';
+    })
+    .withFailureHandler(() => { document.getElementById('m-apikey-status').textContent = '確認に失敗しました'; })
+    .serverAction('hasGeminiApiKey', {});
+}
+
+function saveGeminiApiKey() {
+  const key = document.getElementById('m-apikey').value.trim();
+  if (!key) { showToast('APIキーを入力してください', 'error'); return; }
+  google.script.run
+    .withSuccessHandler(res => {
+      const parsed = typeof res === 'string' ? JSON.parse(res) : res;
+      if (!parsed.success) { showToast(parsed.error, 'error'); return; }
+      showToast('APIキーを保存しました', 'success');
+      document.getElementById('m-apikey').value = '';
+      refreshApiKeyStatus();
+    })
+    .withFailureHandler(e => showToast(e.message, 'error'))
+    .serverAction('setGeminiApiKey', { apiKey: key });
+}
+
+function saveMeetingSettings() {
+  const kvs = [
+    { key: 'GEMINI_MODEL', value: document.getElementById('m-model').value || 'gemini-2.5-flash' },
+    { key: 'RECORDING_FOLDER_ID', value: document.getElementById('m-folder').value.trim() },
+    { key: 'MEETING_SCAN_INTERVAL', value: document.getElementById('m-interval').value || '10' },
+  ];
+  let done = 0;
+  kvs.forEach(kv => {
+    google.script.run
+      .withSuccessHandler(() => { done++; if (done === kvs.length) { showToast('設定を保存しました', 'success'); settings[kv.key] = kv.value; } })
+      .withFailureHandler(e => showToast(e.message, 'error'))
+      .serverAction('setFeature', kv);
+  });
+}
+
+function runFolderScanNow() {
+  showToast('フォルダを確認しています…', 'success');
+  google.script.run
+    .withSuccessHandler(res => {
+      const parsed = typeof res === 'string' ? JSON.parse(res) : res;
+      if (!parsed.success) { showToast(parsed.error, 'error'); return; }
+      showToast(`取込完了: ${parsed.data.processed}件処理（失敗${parsed.data.failed}件）`, 'success');
+    })
+    .withFailureHandler(e => showToast(e.message, 'error'))
+    .serverAction('scanRecordingFolder', {});
 }
 
 // ── ユーティリティ ──
