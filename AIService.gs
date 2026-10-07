@@ -347,3 +347,105 @@ function generateRepReviewAI(context) {
 
   return extracted;
 }
+
+/**
+ * AIアシスト - 自然文の質問に、CRM集計データ（KPI・パイプライン・担当者実績・
+ * 直近活動・クローズ間近の商談・顧客分析の頻出テーマ）だけを根拠に回答する。
+ * 集計自体はAnalyticsModule.gs側で決定的に行い、AIには解釈・自然文化のみを担わせる。
+ */
+function askCrmAssistantAI(context, question) {
+  const apiKey = _getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('Gemini APIキーが未設定です。管理画面「議事録AI」タブから設定してください。');
+  }
+
+  const model = getSetting('GEMINI_MODEL', 'gemini-2.5-flash');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const teamText = (context.team || []).map(t =>
+    `${t.assigned_user}: 累計受注${t.wonDeals}件(¥${t.wonAmount})、今月受注${t.wonThisMonth}件(¥${t.wonAmountThisMonth})、担当商談${t.totalDeals}件`
+  ).join('\n');
+  const pipelineText = Object.entries(context.pipeline || {}).map(([phase, d]) =>
+    `${phase}: ${d.count}件、合計¥${d.total_amount}、加重¥${d.weighted_amount}`
+  ).join('\n');
+  const activitiesText = (context.recentActivities || []).map(a =>
+    `${a.date} [${a.type}] ${a.subject}（担当:${a.assigned_user}）`
+  ).join('\n');
+  const nearCloseText = (context.nearClose || []).map(d =>
+    `${d.company} - ${d.name}: ¥${d.amount}（予定日${d.closeDate}、担当:${d.assignedUser}）`
+  ).join('\n');
+  const themesText = (context.recurringThemes || []).map(t => `${t.theme}（${t.count}件）`).join('、');
+
+  const prompt = [
+    'あなたは営業データ分析アシスタントです。以下のCRM集計データだけを根拠に、ユーザーの質問に日本語で回答してください。',
+    'データから読み取れない内容は創作せず「データからは判断できません」と答えてください。推測を含む場合は推測である旨を明示してください。',
+    '',
+    '【KPIサマリー】',
+    JSON.stringify(context.kpi || {}),
+    '',
+    '【パイプライン（フェーズ別）】',
+    pipelineText || 'なし',
+    '',
+    '【担当者別実績】',
+    teamText || 'なし',
+    '',
+    '【最近の活動（直近30件）】',
+    activitiesText || 'なし',
+    '',
+    '【クローズ間近の商談（14日以内）】',
+    nearCloseText || 'なし',
+    '',
+    '【顧客分析から見える頻出課題テーマ（全体傾向）】',
+    themesText || 'なし',
+    '',
+    `質問: ${question}`,
+    '',
+    '出力は以下のキーを持つJSONオブジェクト1つのみとし、説明文やコードブロック記法は付けないこと:',
+    '{',
+    '  "answer": "回答文（プレーンテキスト。箇条書きは「・」を使う）",',
+    '  "table": [ { "label": "項目名", "value": 数値 } ]',
+    '}',
+    '質問がランキングや比較を伴う場合のみtableを数値で埋め、該当しない場合は空配列にすること。',
+  ].join('\n');
+
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },
+  };
+
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+
+  const code = res.getResponseCode();
+  const body = res.getContentText();
+
+  if (code !== 200) {
+    logError('Gemini APIエラー（AIアシスト）', { message: `HTTP ${code}: ${body.substring(0, 500)}` });
+    throw new Error(`AI回答生成でエラーが発生しました（HTTP ${code}）。APIキーや利用枠をご確認ください。`);
+  }
+
+  let json;
+  try { json = JSON.parse(body); } catch (e) {
+    throw new Error('Gemini応答の解析に失敗しました。');
+  }
+
+  const candidate = json.candidates && json.candidates[0];
+  const text = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text;
+  if (!text) {
+    const finishReason = candidate && candidate.finishReason;
+    throw new Error(`AIから有効な応答が得られませんでした（理由: ${finishReason || '不明'}）。`);
+  }
+
+  let extracted;
+  try {
+    extracted = JSON.parse(text);
+  } catch (e) {
+    throw new Error('AI出力のJSON解析に失敗しました: ' + e.message);
+  }
+
+  return { answer: extracted.answer || '', table: Array.isArray(extracted.table) ? extracted.table : [] };
+}

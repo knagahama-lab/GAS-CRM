@@ -116,6 +116,12 @@ function _dispatchAction(action, data) {
     case 'getLatestRepPdcaReview':  return getLatestRepPdcaReview(data.assigned_user);
     case 'runInsightRefreshNow':    return (refreshStaleCustomerInsightsTrigger(), successResponse({ done: true }));
 
+    // ── 分析ラボ（要因ツリー・マトリックス・ターゲットリスト・AIアシスト） ──
+    case 'getFactorBreakdown': return getFactorBreakdown(data);
+    case 'getPivotMatrix':     return getPivotMatrix(data);
+    case 'generateTargetList': return generateTargetList(data);
+    case 'askAiAssistant':     return runAiAssistantQuery(data.question);
+
     // ── メール ────────────────────────────────
     case 'sendEmail':         return sendEmail(data);
     case 'getEmailHistory':   return getEmailHistory(data.customer_id);
@@ -157,6 +163,7 @@ function _dispatchAction(action, data) {
 function _getInitData(userEmail) {
   ensureMeetingsSetup();      // 議事録AI機能を追加する前に構築済みのシートへの自動マイグレーション
   ensureInsightReviewSetup(); // 顧客分析AI・PDCAレビュー機能を追加する前に構築済みのシートへの自動マイグレーション
+  ensureAnalyticsSetup();     // 分析ラボ機能を追加する前に構築済みのシートへの自動マイグレーション
   const user = getCurrentUser();
   const settings = getAllSettings();
   const kpi = JSON.parse(getKpiSummary());

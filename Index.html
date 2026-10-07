@@ -259,6 +259,7 @@ textarea.form-control { min-height: 80px; resize: vertical; }
     <button class="nav-item" id="nav-activities" onclick="navigate('activities')"><span class="icon">📝</span>活動ログ</button>
     <button class="nav-item" id="nav-meetings" onclick="navigate('meetings')"><span class="icon">🎙️</span>議事録AI</button>
     <button class="nav-item" id="nav-pdca" onclick="navigate('pdca')"><span class="icon">📈</span>PDCAレビュー</button>
+    <button class="nav-item" id="nav-analytics" onclick="navigate('analytics')"><span class="icon">🔬</span>分析ラボ</button>
   </div>
   <div class="nav-section" id="nav-admin-section" style="display:none">
     <div class="nav-label">管理</div>
@@ -314,6 +315,7 @@ window.onload = async () => {
     if (!boolSetting(s, 'FEATURE_ACTIVITIES'))hide('nav-activities');
     if (!boolSetting(s, 'FEATURE_MEETINGS')) hide('nav-meetings');
     if (!boolSetting(s, 'FEATURE_PDCA'))     hide('nav-pdca');
+    if (!boolSetting(s, 'FEATURE_ANALYTICS'))hide('nav-analytics');
 
     navigate('dashboard');
   } catch(e) {
@@ -342,7 +344,7 @@ function navigate(page) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const navEl = document.getElementById('nav-' + page);
   if (navEl) navEl.classList.add('active');
-  const titles = { dashboard:'ダッシュボード', customers:'顧客管理', deals:'商談管理', kanban:'カンバンボード', activities:'活動ログ', meetings:'議事録AI', pdca:'PDCAレビュー', admin:'管理画面' };
+  const titles = { dashboard:'ダッシュボード', customers:'顧客管理', deals:'商談管理', kanban:'カンバンボード', activities:'活動ログ', meetings:'議事録AI', pdca:'PDCAレビュー', analytics:'分析ラボ', admin:'管理画面' };
   document.getElementById('page-title').textContent = titles[page] || page;
   closeSidebar();
 
@@ -354,6 +356,7 @@ function navigate(page) {
     case 'activities': renderActivities(); break;
     case 'meetings':   renderMeetings(); break;
     case 'pdca':       renderPdca(); break;
+    case 'analytics':  renderAnalytics(); break;
     case 'admin':
       google.script.run
         .withSuccessHandler(function(url) { window.open(url + '?page=admin', '_top'); })
@@ -1118,6 +1121,275 @@ function renderPdcaCards(r) {
     <div style="font-weight:700;font-size:13px;margin-bottom:6px">📋 未完了の提案アクション（顧客分析より）</div>
     <ul style="padding-left:18px;font-size:12.5px;line-height:1.8;color:var(--mid)">${openActions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>` : ''}
   `;
+}
+
+// ── 分析ラボ（要因ツリー・マトリックス・ターゲットリスト・AIアシスト） ──
+async function renderAnalytics() {
+  if (!state.customers || !state.customers.length) {
+    state.customers = await call('getAllCustomers') || [];
+  }
+  setContent(`
+    <div class="tabs">
+      <div class="tab active" data-atab="factor" onclick="switchAnalyticsTab('factor')">🌳 要因ツリー</div>
+      <div class="tab" data-atab="matrix" onclick="switchAnalyticsTab('matrix')">🔢 マトリックス</div>
+      <div class="tab" data-atab="target" onclick="switchAnalyticsTab('target')">🎯 ターゲットリスト</div>
+      <div class="tab" data-atab="ai" onclick="switchAnalyticsTab('ai')">🤖 AIアシスト</div>
+    </div>
+    <div id="a-factor">${factorTreeInitialHtml()}</div>
+    <div id="a-matrix" style="display:none">${matrixInitialHtml()}</div>
+    <div id="a-target" style="display:none">${targetListInitialHtml()}</div>
+    <div id="a-ai" style="display:none">${aiAssistInitialHtml()}</div>`);
+
+  runFactorTree();
+  runMatrix();
+}
+
+function switchAnalyticsTab(name) {
+  ['factor','matrix','target','ai'].forEach(n => {
+    const el = document.getElementById('a-' + n);
+    if (el) el.style.display = (n === name) ? 'block' : 'none';
+  });
+  document.querySelectorAll('[data-atab]').forEach(el => el.classList.toggle('active', el.dataset.atab === name));
+}
+
+function dimensionLabel(d) { return {phase:'フェーズ',assigned_user:'担当者',industry:'業種',customer_status:'ステータス',month:'月',activity_type:'種別'}[d] || d; }
+function emptyBox(msg) { return `<div class="empty-state" style="padding:30px"><div class="empty-title">${msg}</div></div>`; }
+
+// ── ① 要因ツリー ──────────────────────────────────────────
+function factorTreeInitialHtml() {
+  return `
+    <div class="card"><div class="card-body" style="padding:16px 22px">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+        <div class="form-group" style="margin:0;min-width:180px"><label class="form-label">指標</label>
+          <select class="form-control" id="ft-metric" onchange="resetFactorTree()">
+            <option value="deal_amount">商談金額合計</option>
+            <option value="won_amount">受注金額合計</option>
+            <option value="deal_count">商談件数</option>
+            <option value="activity_count">活動件数</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;min-width:160px"><label class="form-label">分解軸</label>
+          <select class="form-control" id="ft-dimension" onchange="runFactorTree()">
+            <option value="phase">フェーズ</option>
+            <option value="assigned_user">担当者</option>
+            <option value="industry">業種</option>
+            <option value="customer_status">顧客ステータス</option>
+            <option value="month">月</option>
+          </select>
+        </div>
+        <button class="btn btn-outline btn-sm" onclick="resetFactorTree()">↺ リセット</button>
+      </div>
+      <div id="ft-breadcrumb" style="margin-bottom:10px"></div>
+      <div id="ft-result"><div class="loading" style="padding:30px"><div class="spinner"></div></div></div>
+    </div></div>`;
+}
+
+function resetFactorTree() { state.factorTrail = []; runFactorTree(); }
+
+async function runFactorTree() {
+  const metric = val('ft-metric');
+  const dimension = val('ft-dimension');
+  const trail = state.factorTrail || (state.factorTrail = []);
+  const resultEl = document.getElementById('ft-result');
+  if (!resultEl) return;
+  resultEl.innerHTML = `<div class="loading" style="padding:30px"><div class="spinner"></div></div>`;
+
+  const res = await call('getFactorBreakdown', { metric, dimension, filters: trail });
+  if (!res) return;
+  state.factorItems = res.items;
+  state.factorCurrentDimension = dimension;
+
+  const breadcrumbEl = document.getElementById('ft-breadcrumb');
+  if (breadcrumbEl) {
+    breadcrumbEl.innerHTML = trail.length
+      ? `<div style="display:flex;gap:6px;flex-wrap:wrap">${trail.map((f,i) => `<span class="badge" style="background:#EEF0FE;color:var(--primary);cursor:pointer" onclick="truncateFactorTrail(${i})">${esc(f.label)} ✕</span>`).join('')}</div>`
+      : '';
+  }
+
+  const isAmount = (metric === 'deal_amount' || metric === 'won_amount');
+  const max = Math.max(1, ...res.items.map(i => i.value));
+  const rows = res.items.length ? res.items.map((it, idx) => {
+    const pct = Math.round(it.value / max * 100);
+    const displayVal = isAmount ? '¥' + Number(it.value).toLocaleString() : it.value + '件';
+    return `<div style="margin-bottom:8px;cursor:pointer" onclick="drillFactorTree(${idx})">
+      <div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px">
+        <span>${esc(it.label)}（${it.count}件）</span><span style="font-weight:700">${displayVal}</span>
+      </div>
+      <div style="background:#F3F4F6;border-radius:6px;height:18px;overflow:hidden">
+        <div style="background:var(--primary);height:100%;width:${pct}%"></div>
+      </div>
+    </div>`;
+  }).join('') : emptyBox('データがありません');
+
+  resultEl.innerHTML = `
+    <div style="font-size:12px;color:var(--gray);margin-bottom:10px">クリックして絞り込み、別の分解軸を選ぶとさらに分解できます（合計: ${isAmount ? '¥'+Number(res.total).toLocaleString() : res.total+'件'}）</div>
+    ${rows}`;
+}
+
+function drillFactorTree(index) {
+  const item = (state.factorItems || [])[index];
+  if (!item) return;
+  state.factorTrail.push({ dimension: state.factorCurrentDimension, value: item.label, label: `${dimensionLabel(state.factorCurrentDimension)}: ${item.label}` });
+  runFactorTree();
+}
+function truncateFactorTrail(index) {
+  state.factorTrail = state.factorTrail.slice(0, index);
+  runFactorTree();
+}
+
+// ── ② マトリックス ────────────────────────────────────────
+function matrixInitialHtml() {
+  return `
+    <div class="card"><div class="card-body" style="padding:16px 22px">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+        <div class="form-group" style="margin:0;min-width:140px"><label class="form-label">対象</label>
+          <select class="form-control" id="mx-sheet" onchange="runMatrix()">
+            <option value="deals">商談</option>
+            <option value="activities">活動</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;min-width:140px"><label class="form-label">行</label>
+          <select class="form-control" id="mx-row" onchange="runMatrix()">
+            <option value="phase">フェーズ</option>
+            <option value="assigned_user">担当者</option>
+            <option value="industry">業種</option>
+            <option value="month">月</option>
+            <option value="activity_type">活動種別</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;min-width:140px"><label class="form-label">列</label>
+          <select class="form-control" id="mx-col" onchange="runMatrix()">
+            <option value="assigned_user">担当者</option>
+            <option value="phase">フェーズ</option>
+            <option value="month">月</option>
+            <option value="industry">業種</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0;min-width:140px"><label class="form-label">指標</label>
+          <select class="form-control" id="mx-metric" onchange="runMatrix()">
+            <option value="count">件数</option>
+            <option value="amount">金額合計</option>
+            <option value="won_amount">受注金額合計</option>
+          </select>
+        </div>
+      </div>
+      <div id="mx-result" style="overflow-x:auto"><div class="loading" style="padding:30px"><div class="spinner"></div></div></div>
+    </div></div>`;
+}
+
+async function runMatrix() {
+  const params = { sheet: val('mx-sheet'), rowDim: val('mx-row'), colDim: val('mx-col'), metric: val('mx-metric') };
+  const resultEl = document.getElementById('mx-result');
+  if (!resultEl) return;
+  resultEl.innerHTML = `<div class="loading" style="padding:30px"><div class="spinner"></div></div>`;
+
+  const res = await call('getPivotMatrix', params);
+  if (!res) return;
+  if (!res.rowKeys.length || !res.colKeys.length) { resultEl.innerHTML = emptyBox('データがありません'); return; }
+
+  const flatValues = res.matrix.reduce((acc, row) => acc.concat(row), []);
+  const max = Math.max(1, ...flatValues);
+  const fmt = v => (params.metric === 'count') ? v : '¥' + Number(v).toLocaleString();
+
+  let html = `<table><thead><tr><th>${dimensionLabel(params.rowDim)} ＼ ${dimensionLabel(params.colDim)}</th>${res.colKeys.map(c=>`<th style="text-align:right">${esc(c)}</th>`).join('')}<th style="text-align:right;background:#374151;color:white">合計</th></tr></thead><tbody>`;
+  res.rowKeys.forEach((rk, ri) => {
+    html += `<tr><td style="font-weight:600">${esc(rk)}</td>`;
+    res.colKeys.forEach((ck, ci) => {
+      const v = res.matrix[ri][ci];
+      const alpha = v > 0 ? Math.max(0.08, v / max) : 0;
+      html += `<td style="text-align:right;background:rgba(79,110,247,${alpha})">${v > 0 ? fmt(v) : '—'}</td>`;
+    });
+    html += `<td style="text-align:right;font-weight:700;background:#F3F4F6">${fmt(res.rowTotals[ri])}</td></tr>`;
+  });
+  html += `<tr><td style="font-weight:700;background:#374151;color:white">合計</td>${res.colTotals.map(v=>`<td style="text-align:right;font-weight:700;background:#F3F4F6">${fmt(v)}</td>`).join('')}<td style="text-align:right;font-weight:800;background:#374151;color:white">${fmt(res.grandTotal)}</td></tr>`;
+  html += `</tbody></table>`;
+  resultEl.innerHTML = html;
+}
+
+// ── ③ ターゲットリスト ────────────────────────────────────
+function targetListInitialHtml() {
+  return `
+    <div class="card"><div class="card-body" style="padding:16px 22px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+        <button class="btn btn-outline btn-sm" onclick="runTargetList('STALLED')">⏸ 停滞商談</button>
+        <button class="btn btn-outline btn-sm" onclick="runTargetList('CLOSING_SOON')">⏰ クローズ間近</button>
+        <button class="btn btn-outline btn-sm" onclick="runTargetList('DORMANT')">💤 休眠顧客</button>
+        <button class="btn btn-outline btn-sm" onclick="runTargetList('HIGH_RISK')">⚠️ 高額・低確度</button>
+        <button class="btn btn-outline btn-sm" onclick="runTargetList('OVERDUE_ACTION')">🚨 フォロー遅延</button>
+      </div>
+      <div id="tl-result">${emptyBox('上のボタンからリストを生成してください')}</div>
+    </div></div>`;
+}
+
+async function runTargetList(preset) {
+  const resultEl = document.getElementById('tl-result');
+  if (!resultEl) return;
+  resultEl.innerHTML = `<div class="loading" style="padding:30px"><div class="spinner"></div></div>`;
+
+  const res = await call('generateTargetList', { preset, days: 14 });
+  if (!res) return;
+  state.targetListItems = res.items;
+  const presetLabel = { STALLED:'停滞商談', CLOSING_SOON:'クローズ間近', DORMANT:'休眠顧客', HIGH_RISK:'高額・低確度', OVERDUE_ACTION:'フォロー遅延' }[preset];
+
+  const rows = res.items.length ? res.items.map((it,i) => `
+    <tr>
+      <td><strong>${esc(it.company_name||'')}</strong>${it.deal_name?`<div style="font-size:11px;color:var(--gray)">${esc(it.deal_name)}</div>`:''}</td>
+      <td>${esc(it.reason)}</td>
+      <td>${esc(it.detail||'')}</td>
+      <td class="td-actions"><button class="btn btn-outline btn-sm" onclick="openTargetItem(${i})">詳細</button></td>
+    </tr>`).join('') : emptyRow(4, '該当する対象はありません');
+
+  resultEl.innerHTML = `
+    <div style="font-size:12px;color:var(--gray);margin-bottom:10px">${presetLabel}: ${res.items.length}件</div>
+    <table><thead><tr><th>顧客・商談</th><th>理由</th><th>詳細</th><th>操作</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function openTargetItem(index) {
+  const it = (state.targetListItems || [])[index];
+  if (!it || !it.customer_id) return;
+  showCustomerDetail(it.customer_id);
+}
+
+// ── ④ AIアシスト ──────────────────────────────────────────
+function aiAssistInitialHtml() {
+  return `
+    <div class="card"><div class="card-body" style="padding:16px 22px">
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input class="form-control" id="ai-question" placeholder="例: 先月の受注率が一番高い担当者は？" onkeydown="if(event.key==='Enter')askAiAssistantUi()">
+        <button class="btn btn-primary" onclick="askAiAssistantUi()">質問する</button>
+      </div>
+      <div id="ai-chat"></div>
+    </div></div>`;
+}
+
+async function askAiAssistantUi() {
+  const q = val('ai-question');
+  if (!q.trim()) return;
+  const chat = document.getElementById('ai-chat');
+  const qId = 'ai-a-' + Date.now();
+  chat.insertAdjacentHTML('afterbegin', `
+    <div style="margin-bottom:14px;padding-bottom:14px;border-bottom:1px solid var(--border)">
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px">🗣 ${esc(q)}</div>
+      <div id="${qId}" class="loading" style="padding:16px 0;justify-content:flex-start"><div class="spinner" style="width:20px;height:20px"></div><span style="font-size:12px">AIが回答を作成しています…</span></div>
+    </div>`);
+  document.getElementById('ai-question').value = '';
+
+  const res = await call('askAiAssistant', { question: q });
+  const target = document.getElementById(qId);
+  if (!res) { if (target) target.remove(); return; }
+
+  let tableHtml = '';
+  if (res.table && res.table.length) {
+    const max = Math.max(1, ...res.table.map(t => Number(t.value) || 0));
+    tableHtml = `<div style="margin-top:8px">${res.table.map(t => {
+      const pct = Math.round((Number(t.value) || 0) / max * 100);
+      return `<div style="margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between;font-size:12px"><span>${esc(t.label)}</span><span style="font-weight:700">${t.value}</span></div>
+        <div style="background:#F3F4F6;border-radius:6px;height:14px;overflow:hidden"><div style="background:var(--primary);height:100%;width:${pct}%"></div></div>
+      </div>`;
+    }).join('')}</div>`;
+  }
+  if (target) target.outerHTML = `<div style="font-size:12.5px;line-height:1.7;white-space:pre-wrap">${esc(res.answer)}</div>${tableHtml}`;
 }
 
 // ── モーダル: 顧客追加 ────────────────────────────────────

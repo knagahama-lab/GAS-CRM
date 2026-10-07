@@ -79,6 +79,7 @@ function _createSettingsSheet(ss) {
     ['FEATURE_PDCA',        'TRUE',  now(), '', '営業担当者別PDCAレビュー機能'],
     ['INSIGHT_AUTO_REFRESH','TRUE',  now(), '', '顧客分析AI：新しい議事録・活動がある顧客を定期的に自動再分析するか'],
     ['PDCA_AUTO_REVIEW',    'TRUE',  now(), '', 'PDCAレビュー：月次で全担当者分を自動生成・メール送信するか'],
+    ['FEATURE_ANALYTICS',   'TRUE',  now(), '', '分析ラボ（要因ツリー・マトリックス・ターゲットリスト・AIアシスト）'],
     ['EMAIL_SCAN_INTERVAL', '15',    now(), '', 'Gmailスキャン間隔（分）'],
     ['REPORT_RECIPIENTS',   Session.getActiveUser().getEmail(), now(), '', 'レポート送信先メール（カンマ区切り）'],
     ['REPORT_SCHEDULE',     'WEEKLY',now(), '', 'レポート頻度 DAILY/WEEKLY/MONTHLY'],
