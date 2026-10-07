@@ -32,6 +32,19 @@ function ensureMeetingsSetup() {
       logInfo('Meetings シートを自動補完作成しました');
     }
 
+    // Insightsシートが無ければ新規作成のみ行う（既存シートには一切触れない）
+    if (!ss.getSheetByName(INSIGHTS_SHEET)) {
+      const sheet = ss.insertSheet(INSIGHTS_SHEET);
+      const headers = ['insight_id','customer_id','source_meeting_count','source_activity_count',
+        'themes_json','problem_awareness','swot_json','pest_json','three_c_json','contact_points',
+        'hypotheses_json','if_i_were_customer_json','proposal_actions_json','data_sufficiency',
+        'assigned_user','created_at'];
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+        .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
+      sheet.autoResizeColumns(1, headers.length);
+      logInfo('Insights シートを自動補完作成しました');
+    }
+
     // Settingsシートに新設定キーが無ければ末尾に追記する（既存行は一切変更しない）
     const settingsSheet = ss.getSheetByName(SETTINGS_SHEET);
     if (settingsSheet) {
@@ -42,6 +55,7 @@ function ensureMeetingsSetup() {
         ['RECORDING_FOLDER_ID',   '',     now(), '', '議事録AI：録音データを監視するDriveフォルダID（空欄なら自動作成フォルダを使用）'],
         ['GEMINI_MODEL',          'gemini-2.5-flash', now(), '', '議事録AI：使用するGeminiモデル名'],
         ['MEETING_SCAN_INTERVAL', '10',   now(), '', '議事録AI：フォルダ監視の実行間隔（分）'],
+        ['FEATURE_INSIGHTS',      'TRUE', now(), '', '顧客分析AI（SWOT/PEST/3C分析・仮説立案）'],
       ];
       const missing = defaults.filter(d => existingKeys.indexOf(d[0]) === -1);
       if (missing.length) {

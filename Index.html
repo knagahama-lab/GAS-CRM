@@ -1122,15 +1122,17 @@ async function showDealDetail(dealId) {
 async function showCustomerDetail(customerId) {
   const cust = state.customers.find(c => c.customer_id === customerId);
   if (!cust) return;
-  const [deals, activities] = await Promise.all([
+  const [deals, activities, insight] = await Promise.all([
     call('getDealsByCustomer', { customer_id: customerId }),
     call('getActivitiesByCustomer', { customer_id: customerId }),
+    boolSetting(state.initData?.settings, 'FEATURE_INSIGHTS') ? call('getLatestInsight', { customer_id: customerId }) : Promise.resolve(null),
   ]);
 
   const dealRows = (deals||[]).map(d => `<tr><td>${esc(d.deal_name)}</td><td>¥${Number(d.amount||0).toLocaleString()}</td><td>${d.phase}</td></tr>`).join('') ||
     emptyRow(3, '商談がありません');
   const actRows = (activities||[]).slice(0,5).map(a => `<tr><td>${a.type}</td><td>${esc(a.subject)}</td><td>${fmtDate(a.activity_date)}</td></tr>`).join('') ||
     emptyRow(3, '活動がありません');
+  const showInsightTab = boolSetting(state.initData?.settings, 'FEATURE_INSIGHTS');
 
   showModal(`👥 ${cust.company_name}`, `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;padding:14px;background:#F8FAFC;border-radius:8px">
@@ -1142,16 +1144,147 @@ async function showCustomerDetail(customerId) {
       <div><div style="font-size:11px;color:#6B7280;font-weight:600;text-transform:uppercase">担当</div><div style="margin-top:2px">${esc(cust.assigned_user||'—')}</div></div>
     </div>
     <div class="tabs">
-      <div class="tab active" onclick="switchTab(this,'t-deals','t-acts')">商談（${deals?.length||0}）</div>
-      <div class="tab" onclick="switchTab(this,'t-acts','t-deals')">活動（${activities?.length||0}）</div>
+      <div class="tab active" data-ctab="deals" onclick="switchCustomerTab('deals')">商談（${deals?.length||0}）</div>
+      <div class="tab" data-ctab="acts" onclick="switchCustomerTab('acts')">活動（${activities?.length||0}）</div>
+      ${showInsightTab ? `<div class="tab" data-ctab="insight" onclick="switchCustomerTab('insight')">🧭 分析</div>` : ''}
     </div>
     <div id="t-deals"><table><thead><tr><th>商談名</th><th>金額</th><th>フェーズ</th></tr></thead><tbody>${dealRows}</tbody></table></div>
     <div id="t-acts" style="display:none"><table><thead><tr><th>種別</th><th>件名</th><th>日時</th></tr></thead><tbody>${actRows}</tbody></table></div>
+    ${showInsightTab ? `<div id="t-insight" style="display:none">${renderInsightTabHtml(customerId, insight)}</div>` : ''}
     <div style="margin-top:16px;display:flex;gap:8px">
       <button class="btn btn-primary btn-sm" onclick="showAddDeal('${customerId}')">＋ 商談追加</button>
       <button class="btn btn-outline btn-sm" onclick="showAddActivity('${customerId}','','${esc(cust.company_name)}')">＋ 活動記録</button>
     </div>`,
   null, null);
+}
+
+function switchCustomerTab(name) {
+  ['deals','acts','insight'].forEach(n => {
+    const el = document.getElementById('t-' + n);
+    if (el) el.style.display = (n === name) ? 'block' : 'none';
+  });
+  document.querySelectorAll('[data-ctab]').forEach(el => el.classList.toggle('active', el.dataset.ctab === name));
+}
+
+// ── 顧客分析AI（SWOT/PEST/3C分析・仮説立案） ─────────────────
+function renderInsightTabHtml(customerId, insight) {
+  if (!insight) {
+    return `
+      <div class="empty-state" style="padding:40px 20px">
+        <div class="empty-icon">🧭</div>
+        <div class="empty-title">分析はまだありません</div>
+        <div class="empty-desc">蓄積された議事録・活動履歴から、AIがSWOT/PEST/3C分析と提案の仮説を生成します</div>
+        <button class="btn btn-primary" style="margin-top:14px" onclick="generateOrRefreshInsight('${customerId}')">🧭 AIで分析を生成</button>
+      </div>`;
+  }
+  return renderInsightBody(customerId, insight);
+}
+
+function renderInsightBody(customerId, insight) {
+  let themes = [], swot = {}, pest = {}, threeC = {}, hypotheses = [], ifIWere = [], actions = [];
+  try { themes = JSON.parse(insight.themes_json || '[]'); } catch(e) {}
+  try { swot = JSON.parse(insight.swot_json || '{}'); } catch(e) {}
+  try { pest = JSON.parse(insight.pest_json || '{}'); } catch(e) {}
+  try { threeC = JSON.parse(insight.three_c_json || '{}'); } catch(e) {}
+  try { hypotheses = JSON.parse(insight.hypotheses_json || '[]'); } catch(e) {}
+  try { ifIWere = JSON.parse(insight.if_i_were_customer_json || '[]'); } catch(e) {}
+  try { actions = JSON.parse(insight.proposal_actions_json || '[]'); } catch(e) {}
+
+  const themeHtml = themes.length ? themes.map(t => `
+    <div style="background:#F8FAFC;border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px">
+      <div style="font-weight:700;font-size:13px;color:var(--primary)">${esc(t.theme||'')}</div>
+      <div style="font-size:12.5px;margin-top:3px">${esc(t.summary||'')}</div>
+      ${t.evidence ? `<div style="font-size:11.5px;color:var(--gray);margin-top:4px">根拠: ${esc(t.evidence)}</div>` : ''}
+    </div>`).join('') : `<div style="font-size:12.5px;color:var(--gray)">情報不足</div>`;
+
+  const swotCell = (label, items, bg, fg) => `
+    <div style="background:${bg};border-radius:8px;padding:10px 12px">
+      <div style="font-weight:700;font-size:11px;color:${fg};text-transform:uppercase;margin-bottom:6px">${label}</div>
+      <ul style="padding-left:16px;font-size:12.5px;line-height:1.6">${(items&&items.length ? items : ['情報不足']).map(i => `<li>${esc(i)}</li>`).join('')}</ul>
+    </div>`;
+
+  const pestItem = (label, text) => `
+    <div style="background:#F8FAFC;border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+      <div style="font-weight:700;font-size:11px;color:var(--gray);text-transform:uppercase;margin-bottom:4px">${label}</div>
+      <div style="font-size:12.5px">${esc(text || '情報不足')}</div>
+    </div>`;
+
+  const hypothesesHtml = hypotheses.length ? hypotheses.map(h => `
+    <div style="padding:8px 0;border-bottom:1px solid #F3F4F6">
+      <div style="font-weight:600;font-size:12.5px">💡 ${esc(h.hypothesis||'')}</div>
+      <div style="font-size:11.5px;color:var(--gray);margin-top:2px">根拠: ${esc(h.rationale||'')}</div>
+    </div>`).join('') : `<div style="font-size:12.5px;color:var(--gray)">情報不足</div>`;
+
+  const ifIWereHtml = ifIWere.length ? `<ul style="padding-left:18px;font-size:12.5px;line-height:1.8">${ifIWere.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : `<div style="font-size:12.5px;color:var(--gray)">情報不足</div>`;
+
+  const actionsHtml = actions.length ? actions.map((a, i) => `
+    <label style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;cursor:pointer;font-size:12.5px;${a.done?'color:var(--gray);text-decoration:line-through':''}">
+      <input type="checkbox" ${a.done?'checked':''} onchange="handleToggleInsightAction('${insight.insight_id}', ${i})" style="margin-top:2px">
+      <span>${esc(a.action)}</span>
+    </label>`).join('') : `<div style="font-size:12.5px;color:var(--gray)">情報不足</div>`;
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:11.5px;color:var(--gray)">生成日時: ${fmtDate(insight.created_at)}（議事録${insight.source_meeting_count||0}件・活動${insight.source_activity_count||0}件を分析）</div>
+      <button class="btn btn-outline btn-sm" onclick="generateOrRefreshInsight('${customerId}')">🔄 再生成</button>
+    </div>
+
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">① 課題テーマ（抽象化・分類）</div>
+    ${themeHtml}
+
+    <div style="font-weight:700;font-size:13px;margin:16px 0 6px">② 顧客の問題意識</div>
+    <div style="background:#EFF6FF;border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.7">${esc(insight.problem_awareness || '情報不足')}</div>
+
+    <div style="font-weight:700;font-size:13px;margin:16px 0 6px">③ SWOT分析（顧客）</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${swotCell('強み Strengths', swot.strengths, '#F0FDF4', '#065F46')}
+      ${swotCell('弱み Weaknesses', swot.weaknesses, '#FEF2F2', '#991B1B')}
+      ${swotCell('機会 Opportunities', swot.opportunities, '#EFF6FF', '#1E40AF')}
+      ${swotCell('脅威 Threats', swot.threats, '#FFFBEB', '#92400E')}
+    </div>
+
+    <div style="font-weight:700;font-size:13px;margin:16px 0 6px">④ PEST分析（顧客を取り巻くマクロ環境）</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+      ${pestItem('政治 Political', pest.political)}
+      ${pestItem('経済 Economic', pest.economic)}
+      ${pestItem('社会 Social', pest.social)}
+      ${pestItem('技術 Technological', pest.technological)}
+    </div>
+
+    <div style="font-weight:700;font-size:13px;margin:16px 0 6px">⑤ 3C分析</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+      ${pestItem('顧客・市場', threeC.customer)}
+      ${pestItem('競合', threeC.competitor)}
+      ${pestItem('自社（顧客自身）', threeC.company)}
+    </div>
+
+    <div style="font-weight:700;font-size:13px;margin:16px 0 6px">⑥ 自社との接点</div>
+    <div style="background:#EEF0FE;border-radius:8px;padding:10px 12px;font-size:12.5px;line-height:1.7">${esc(insight.contact_points || '情報不足')}</div>
+
+    <div style="font-weight:700;font-size:13px;margin:16px 0 6px">⑦ 課題への仮説</div>
+    ${hypothesesHtml}
+
+    <div style="font-weight:700;font-size:13px;margin:16px 0 6px">⑧ 自分が顧客だったらやること</div>
+    ${ifIWereHtml}
+
+    <div style="font-weight:700;font-size:13px;margin:16px 0 6px">⑨ 次の提案アクション</div>
+    ${actionsHtml}
+
+    ${insight.data_sufficiency ? `<div style="margin-top:14px;font-size:11.5px;color:var(--gray);padding:8px 10px;background:#FAFAFA;border-radius:6px">ℹ️ ${esc(insight.data_sufficiency)}</div>` : ''}
+  `;
+}
+
+async function generateOrRefreshInsight(customerId) {
+  const body = document.getElementById('t-insight');
+  if (body) body.innerHTML = `<div class="loading" style="padding:40px"><div class="spinner"></div><span>AIが議事録・活動履歴を分析しています…</span></div>`;
+  const res = await call('generateCustomerInsight', { customer_id: customerId });
+  if (!res) { if (body) body.innerHTML = renderInsightTabHtml(customerId, null); return; }
+  showSuccess('分析を生成しました');
+  if (body) body.innerHTML = renderInsightBody(customerId, res);
+}
+
+async function handleToggleInsightAction(insightId, index) {
+  await call('toggleInsightAction', { insight_id: insightId, index });
 }
 
 function showQuickAdd() { showAddCustomer(); }

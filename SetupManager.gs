@@ -19,6 +19,7 @@ function setupCRM() {
     _createDealsSheet(ss);
     _createActivitiesSheet(ss);
     _createMeetingsSheet(ss);
+    _createInsightsSheet(ss);
     _createEmailTrackingSheet(ss);
     _createCalendarSheet(ss);
     _createTargetsSheet(ss);
@@ -73,6 +74,7 @@ function _createSettingsSheet(ss) {
     ['RECORDING_FOLDER_ID', '',      now(), '', '議事録AI：録音データを監視するDriveフォルダID（空欄なら自動作成フォルダを使用）'],
     ['GEMINI_MODEL',        'gemini-2.5-flash', now(), '', '議事録AI：使用するGeminiモデル名'],
     ['MEETING_SCAN_INTERVAL','10',   now(), '', '議事録AI：フォルダ監視の実行間隔（分）'],
+    ['FEATURE_INSIGHTS',    'TRUE',  now(), '', '顧客分析AI（SWOT/PEST/3C分析・仮説立案）'],
     ['EMAIL_SCAN_INTERVAL', '15',    now(), '', 'Gmailスキャン間隔（分）'],
     ['REPORT_RECIPIENTS',   Session.getActiveUser().getEmail(), now(), '', 'レポート送信先メール（カンマ区切り）'],
     ['REPORT_SCHEDULE',     'WEEKLY',now(), '', 'レポート頻度 DAILY/WEEKLY/MONTHLY'],
@@ -223,6 +225,22 @@ function _createMeetingsSheet(ss) {
     .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
   _autoResizeColumns(sheet);
   logInfo('Meetings シート作成完了');
+}
+
+function _createInsightsSheet(ss) {
+  let sheet = ss.getSheetByName('🧭 Insights');
+  if (sheet) ss.deleteSheet(sheet);
+  sheet = ss.insertSheet('🧭 Insights');
+
+  const headers = ['insight_id','customer_id','source_meeting_count','source_activity_count',
+    'themes_json','problem_awareness','swot_json','pest_json','three_c_json','contact_points',
+    'hypotheses_json','if_i_were_customer_json','proposal_actions_json','data_sufficiency',
+    'assigned_user','created_at'];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+    .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
+  _autoResizeColumns(sheet);
+  logInfo('Insights シート作成完了');
 }
 
 function _createEmailTrackingSheet(ss) {

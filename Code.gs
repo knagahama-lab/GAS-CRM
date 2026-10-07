@@ -103,6 +103,13 @@ function _dispatchAction(action, data) {
     case 'setGeminiApiKey':        return setGeminiApiKey(data.apiKey);
     case 'hasGeminiApiKey':        return hasGeminiApiKey();
 
+    // ── 顧客分析AI（SWOT/PEST/3C・仮説立案） ─────────────────
+    case 'generateCustomerInsight': return generateCustomerInsight(data.customer_id);
+    case 'getInsightsByCustomer':   return getInsightsByCustomer(data.customer_id);
+    case 'getLatestInsight':        return getLatestInsight(data.customer_id);
+    case 'toggleInsightAction':     return toggleInsightAction(data);
+    case 'deleteInsight':           return deleteInsight(data.insight_id);
+
     // ── メール ────────────────────────────────
     case 'sendEmail':         return sendEmail(data);
     case 'getEmailHistory':   return getEmailHistory(data.customer_id);
