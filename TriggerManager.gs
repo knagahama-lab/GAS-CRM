@@ -36,6 +36,14 @@ function setupTriggers() {
       .timeBased().everyMinutes(meetingInterval).create();
   }
 
+  // T7: 顧客分析AI - 新しい議事録・活動がある顧客を自動で再分析（毎朝6:00）
+  ScriptApp.newTrigger('refreshStaleCustomerInsightsTrigger')
+    .timeBased().everyDays(1).atHour(6).create();
+
+  // T8: PDCAレビュー - 全担当者分を月次で自動生成・メール送信（毎月1日8:00）
+  ScriptApp.newTrigger('generateMonthlyPdcaReviewsTrigger')
+    .timeBased().onMonthDay(1).atHour(8).create();
+
   logInfo('トリガー設定完了');
 }
 

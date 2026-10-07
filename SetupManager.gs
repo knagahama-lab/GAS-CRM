@@ -20,6 +20,7 @@ function setupCRM() {
     _createActivitiesSheet(ss);
     _createMeetingsSheet(ss);
     _createInsightsSheet(ss);
+    _createPdcaReviewsSheet(ss);
     _createEmailTrackingSheet(ss);
     _createCalendarSheet(ss);
     _createTargetsSheet(ss);
@@ -75,6 +76,9 @@ function _createSettingsSheet(ss) {
     ['GEMINI_MODEL',        'gemini-2.5-flash', now(), '', '議事録AI：使用するGeminiモデル名'],
     ['MEETING_SCAN_INTERVAL','10',   now(), '', '議事録AI：フォルダ監視の実行間隔（分）'],
     ['FEATURE_INSIGHTS',    'TRUE',  now(), '', '顧客分析AI（SWOT/PEST/3C分析・仮説立案）'],
+    ['FEATURE_PDCA',        'TRUE',  now(), '', '営業担当者別PDCAレビュー機能'],
+    ['INSIGHT_AUTO_REFRESH','TRUE',  now(), '', '顧客分析AI：新しい議事録・活動がある顧客を定期的に自動再分析するか'],
+    ['PDCA_AUTO_REVIEW',    'TRUE',  now(), '', 'PDCAレビュー：月次で全担当者分を自動生成・メール送信するか'],
     ['EMAIL_SCAN_INTERVAL', '15',    now(), '', 'Gmailスキャン間隔（分）'],
     ['REPORT_RECIPIENTS',   Session.getActiveUser().getEmail(), now(), '', 'レポート送信先メール（カンマ区切り）'],
     ['REPORT_SCHEDULE',     'WEEKLY',now(), '', 'レポート頻度 DAILY/WEEKLY/MONTHLY'],
@@ -241,6 +245,22 @@ function _createInsightsSheet(ss) {
     .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
   _autoResizeColumns(sheet);
   logInfo('Insights シート作成完了');
+}
+
+function _createPdcaReviewsSheet(ss) {
+  let sheet = ss.getSheetByName('📈 PdcaReviews');
+  if (sheet) ss.deleteSheet(sheet);
+  sheet = ss.insertSheet('📈 PdcaReviews');
+
+  const headers = ['review_id','assigned_user','period_label','period_days',
+    'meeting_count','activity_count','deal_count','won_count','won_amount',
+    'insight_count','recurring_themes_json','action_total','action_done','action_completion_rate',
+    'plan','do_text','check_text','act_json','summary_comment','created_at'];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+    .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
+  _autoResizeColumns(sheet);
+  logInfo('PdcaReviews シート作成完了');
 }
 
 function _createEmailTrackingSheet(ss) {

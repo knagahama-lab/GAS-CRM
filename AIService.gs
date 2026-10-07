@@ -246,3 +246,104 @@ function generateCustomerInsightAI(context) {
 
   return extracted;
 }
+
+/**
+ * 営業担当者別PDCAレビューAI - 一定期間の活動実績・顧客分析（Insights）の
+ * 集計結果（頻出課題テーマ、提案アクション完了率など）を渡し、
+ * Plan/Do/Check/Actの形で振り返りコメントを生成する。
+ * 集計自体はReviewModule.gs側で決定的に行い、AIには「解釈・コメント」のみを担わせる。
+ */
+function generateRepReviewAI(context) {
+  const apiKey = _getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('Gemini APIキーが未設定です。管理画面「議事録AI」タブから設定してください。');
+  }
+
+  const model = getSetting('GEMINI_MODEL', 'gemini-2.5-flash');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const activityBreakdownText = Object.entries(context.activityTypeBreakdown || {})
+    .map(([type, count]) => `${type}:${count}件`).join('、') || 'なし';
+  const recurringThemesText = (context.recurringThemes || [])
+    .map(t => `・${t.theme}（${t.count}件の顧客分析で言及）`).join('\n') || '（繰り返し現れるテーマは検出されませんでした）';
+  const openActionsText = (context.openActions || []).map(a => `・${a}`).join('\n') || '（未完了の提案アクションはありません）';
+
+  const prompt = [
+    'あなたは営業マネージャーのコーチとして、担当営業パーソンの活動実績を振り返り、',
+    'PDCAサイクルに基づく改善提案を行う専門アシスタントです。',
+    '',
+    '厳守事項: 入力データに無い事実を創作しないこと。データが乏しい項目は無理に埋めず、その旨を記載すること。',
+    '',
+    `【対象期間】${context.periodLabel}`,
+    `【担当者】${context.repName}`,
+    '',
+    '【活動実績】',
+    `商談録音・議事録件数: ${context.meetingCount}件`,
+    `活動記録件数: ${context.activityCount}件（内訳: ${activityBreakdownText}）`,
+    `担当商談（更新）件数: ${context.dealCount}件（うち受注 ${context.wonCount}件、受注金額 ¥${context.wonAmount}）`,
+    `顧客分析（AI）実施数: ${context.insightCount}件（対象顧客: ${(context.customerNames||[]).join('、') || 'なし'}）`,
+    '',
+    '【顧客分析から繰り返し現れたテーマ（頻出順）】',
+    recurringThemesText,
+    '',
+    `【提案アクションの進捗】完了 ${context.actionDone}件 / 全体 ${context.actionTotal}件（完了率: ${context.completionRate === null ? '算出不可' : context.completionRate + '%'}）`,
+    '未完了の提案アクション一覧:',
+    openActionsText,
+    '',
+    '以下のPDCAフレームワークで振り返りレポートを作成してください：',
+    '- Plan: 今期注力すべきだった、あるいは今後注力すべきテーマ・顧客',
+    '- Do: 実際に行った活動の特徴・傾向（良かった点を含む、データに基づいて具体的に）',
+    '- Check: 繰り返し現れる課題パターン、提案アクションの消化状況から見える問題点、停滞の兆候',
+    '- Act: 次期に向けて具体的に取り組むべき改善アクション（3〜5個、実行可能な粒度で）',
+    '',
+    '出力は以下のキーを持つJSONオブジェクト1つのみとし、説明文やコードブロック記法は付けないこと:',
+    '{',
+    '  "plan": "...",',
+    '  "do": "...",',
+    '  "check": "...",',
+    '  "act": ["改善アクション1", "改善アクション2"],',
+    '  "summary_comment": "マネージャーが一言でつかめる1〜2文の総評"',
+    '}',
+  ].join('\n');
+
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.4 },
+  };
+
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    muteHttpExceptions: true,
+  });
+
+  const code = res.getResponseCode();
+  const body = res.getContentText();
+
+  if (code !== 200) {
+    logError('Gemini APIエラー（PDCAレビュー）', { message: `HTTP ${code}: ${body.substring(0, 500)}` });
+    throw new Error(`AI分析でエラーが発生しました（HTTP ${code}）。APIキーや利用枠をご確認ください。`);
+  }
+
+  let json;
+  try { json = JSON.parse(body); } catch (e) {
+    throw new Error('Gemini応答の解析に失敗しました。');
+  }
+
+  const candidate = json.candidates && json.candidates[0];
+  const text = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text;
+  if (!text) {
+    const finishReason = candidate && candidate.finishReason;
+    throw new Error(`AIから有効な応答が得られませんでした（理由: ${finishReason || '不明'}）。`);
+  }
+
+  let extracted;
+  try {
+    extracted = JSON.parse(text);
+  } catch (e) {
+    throw new Error('AI出力のJSON解析に失敗しました: ' + e.message);
+  }
+
+  return extracted;
+}

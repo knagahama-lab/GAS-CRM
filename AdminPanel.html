@@ -219,6 +219,11 @@ tr:hover td { background: #FAFBFF; }
         </div>
         <hr style="border:none;border-top:1px solid var(--border)">
         <div>
+          <p style="font-size:13px;color:#6B7280;margin-bottom:8px">新しい議事録・活動がある顧客の分析（SWOT/PEST/3C）を今すぐ一括更新します（1回あたり最大15件）。</p>
+          <button class="btn" style="background:#EEF0FE;color:var(--primary);border:1px solid #C7D2FE" onclick="runInsightRefresh()">🧭 顧客分析を一括更新</button>
+        </div>
+        <hr style="border:none;border-top:1px solid var(--border)">
+        <div>
           <p style="font-size:13px;color:#EF4444;margin-bottom:8px">⚠️ 全シートを再作成します（データは消えません）。</p>
           <button class="btn btn-danger" onclick="if(confirm('トリガーを再設定してよいですか？'))resetTriggers()">⚠️ 全トリガー削除・再設定</button>
         </div>
@@ -254,6 +259,8 @@ const FEATURE_DEFS = {
     { key:'FEATURE_SEARCH',  name:'グローバル検索',  desc:'顧客・商談・活動を横断検索' },
     { key:'FEATURE_DEDUP',   name:'重複チェック',    desc:'顧客登録時の重複自動検出' },
     { key:'FEATURE_MEETINGS',name:'議事録AI',        desc:'録音の文字起こし・CRM自動紐付け' },
+    { key:'FEATURE_INSIGHTS',name:'顧客分析AI',      desc:'SWOT/PEST/3C分析・仮説立案' },
+    { key:'FEATURE_PDCA',    name:'PDCAレビュー',    desc:'営業担当者別の定期振り返り' },
   ],
 };
 
@@ -433,6 +440,18 @@ function runEmailScan() {
     .withSuccessHandler(() => showToast('メールスキャンを実行しました', 'success'))
     .withFailureHandler(e => showToast(e.message, 'error'))
     .scanEmails();
+}
+
+function runInsightRefresh() {
+  showToast('顧客分析を一括更新しています…', 'success');
+  google.script.run
+    .withSuccessHandler(res => {
+      const parsed = typeof res === 'string' ? JSON.parse(res) : res;
+      if (!parsed.success) { showToast(parsed.error, 'error'); return; }
+      showToast('顧客分析の一括更新が完了しました', 'success');
+    })
+    .withFailureHandler(e => showToast(e.message, 'error'))
+    .serverAction('runInsightRefreshNow', {});
 }
 
 // ── タブ ──

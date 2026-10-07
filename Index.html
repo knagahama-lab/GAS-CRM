@@ -258,6 +258,7 @@ textarea.form-control { min-height: 80px; resize: vertical; }
     <button class="nav-item" id="nav-kanban" onclick="navigate('kanban')"><span class="icon">📋</span>カンバン</button>
     <button class="nav-item" id="nav-activities" onclick="navigate('activities')"><span class="icon">📝</span>活動ログ</button>
     <button class="nav-item" id="nav-meetings" onclick="navigate('meetings')"><span class="icon">🎙️</span>議事録AI</button>
+    <button class="nav-item" id="nav-pdca" onclick="navigate('pdca')"><span class="icon">📈</span>PDCAレビュー</button>
   </div>
   <div class="nav-section" id="nav-admin-section" style="display:none">
     <div class="nav-label">管理</div>
@@ -312,6 +313,7 @@ window.onload = async () => {
     if (!boolSetting(s, 'FEATURE_KANBAN'))    hide('nav-kanban');
     if (!boolSetting(s, 'FEATURE_ACTIVITIES'))hide('nav-activities');
     if (!boolSetting(s, 'FEATURE_MEETINGS')) hide('nav-meetings');
+    if (!boolSetting(s, 'FEATURE_PDCA'))     hide('nav-pdca');
 
     navigate('dashboard');
   } catch(e) {
@@ -340,7 +342,7 @@ function navigate(page) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const navEl = document.getElementById('nav-' + page);
   if (navEl) navEl.classList.add('active');
-  const titles = { dashboard:'ダッシュボード', customers:'顧客管理', deals:'商談管理', kanban:'カンバンボード', activities:'活動ログ', meetings:'議事録AI', admin:'管理画面' };
+  const titles = { dashboard:'ダッシュボード', customers:'顧客管理', deals:'商談管理', kanban:'カンバンボード', activities:'活動ログ', meetings:'議事録AI', pdca:'PDCAレビュー', admin:'管理画面' };
   document.getElementById('page-title').textContent = titles[page] || page;
   closeSidebar();
 
@@ -351,6 +353,7 @@ function navigate(page) {
     case 'kanban':     renderKanban(); break;
     case 'activities': renderActivities(); break;
     case 'meetings':   renderMeetings(); break;
+    case 'pdca':       renderPdca(); break;
     case 'admin':
       google.script.run
         .withSuccessHandler(function(url) { window.open(url + '?page=admin', '_top'); })
@@ -973,6 +976,148 @@ async function onMeetingCustomerChange() {
   if (!existingOpts) newDealNameInput.value = suggestedDealName || newDealNameInput.value;
   newDealFields.style.display = dealSelect.value === 'NEW' ? 'block' : 'none';
   dealSelect.onchange = () => { newDealFields.style.display = dealSelect.value === 'NEW' ? 'block' : 'none'; };
+}
+
+// ── PDCAレビュー（営業担当者別の振り返り） ──────────────────
+async function renderPdca() {
+  setContent(skeletonTable(4));
+  const isAdmin = state.initData?.isAdmin;
+  const users = state.initData?.users || [];
+  const selfEmail = state.initData?.user?.email;
+  if (!state.pdcaTargetUser) state.pdcaTargetUser = selfEmail;
+  if (!state.pdcaPeriodDays) state.pdcaPeriodDays = 30;
+  const targetUser = state.pdcaTargetUser;
+  const periodDays = state.pdcaPeriodDays;
+
+  const userOpts = users.map(u => `<option value="${u.email}" ${u.email===targetUser?'selected':''}>${esc(u.name||u.email)}</option>`).join('');
+
+  const [latest, history] = await Promise.all([
+    call('getLatestRepPdcaReview', { assigned_user: targetUser }),
+    call('getRepPdcaReviews', { assigned_user: targetUser }),
+  ]);
+  state.pdcaHistory = history || [];
+
+  setContent(`
+    <div class="card" style="margin-bottom:16px">
+      <div class="card-body" style="padding:16px 22px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+        ${isAdmin ? `
+        <div class="form-group" style="margin:0;min-width:200px">
+          <label class="form-label">対象担当者</label>
+          <select class="form-control" id="pdca-user" onchange="onPdcaUserChange()">${userOpts}</select>
+        </div>` : ''}
+        <div class="form-group" style="margin:0;min-width:160px">
+          <label class="form-label">対象期間</label>
+          <select class="form-control" id="pdca-period" onchange="onPdcaPeriodChange()">
+            <option value="30" ${periodDays==30?'selected':''}>直近30日</option>
+            <option value="90" ${periodDays==90?'selected':''}>直近90日</option>
+            <option value="180" ${periodDays==180?'selected':''}>直近180日</option>
+          </select>
+        </div>
+        <button class="btn btn-primary" onclick="generatePdcaForCurrent()">📈 振り返りを生成</button>
+        ${isAdmin ? `<button class="btn btn-outline" onclick="runInsightRefreshNowUi()">🔄 顧客分析を一括更新</button>` : ''}
+      </div>
+    </div>
+    <div id="pdca-body">${renderPdcaBody(latest)}</div>
+    <div class="card" style="margin-top:16px">
+      <div class="card-header"><div class="card-title">🕑 振り返り履歴</div></div>
+      <div class="card-body"><table><thead><tr><th>生成日時</th><th>期間</th><th>アクション完了率</th><th>総評</th></tr></thead>
+      <tbody>${renderPdcaHistoryRows(state.pdcaHistory)}</tbody></table></div>
+    </div>`);
+}
+
+function onPdcaUserChange() { state.pdcaTargetUser = val('pdca-user'); renderPdca(); }
+function onPdcaPeriodChange() { state.pdcaPeriodDays = Number(val('pdca-period')); renderPdca(); }
+
+async function generatePdcaForCurrent() {
+  const targetUser = state.pdcaTargetUser || state.initData?.user?.email;
+  const periodDays = state.pdcaPeriodDays || 30;
+  const body = document.getElementById('pdca-body');
+  if (body) body.innerHTML = `<div class="card"><div class="loading" style="padding:50px"><div class="spinner"></div><span>AIが振り返りを生成しています…</span></div></div>`;
+  const res = await call('generateRepPdcaReview', { assigned_user: targetUser, period_days: periodDays });
+  if (!res) { renderPdca(); return; }
+  showSuccess('PDCAレビューを生成しました');
+  renderPdca();
+}
+
+async function runInsightRefreshNowUi() {
+  showInfo('顧客分析を一括更新しています…（数分かかる場合があります）');
+  const res = await call('runInsightRefreshNow');
+  if (!res) return;
+  showSuccess('顧客分析の一括更新が完了しました');
+}
+
+function renderPdcaBody(review) {
+  if (!review) {
+    return `<div class="card"><div class="empty-state" style="padding:50px 20px">
+      <div class="empty-icon">📈</div>
+      <div class="empty-title">PDCAレビューはまだありません</div>
+      <div class="empty-desc">議事録・活動履歴・顧客分析が蓄積されたら「振り返りを生成」を押してください</div>
+    </div></div>`;
+  }
+  return `<div class="card"><div class="card-body" style="padding:20px 22px">
+    <div style="font-size:11.5px;color:var(--gray);margin-bottom:10px">生成日時: ${fmtDate(review.created_at)}（${esc(review.period_label)}）</div>
+    ${renderPdcaCards(review)}
+  </div></div>`;
+}
+
+function renderPdcaHistoryRows(history) {
+  if (!history || !history.length) return emptyRow(4, '振り返り履歴がありません');
+  return history.map((r,i) => `<tr style="cursor:pointer" onclick="showPdcaDetailModal(${i})">
+    <td>${fmtDate(r.created_at)}</td><td>${esc(r.period_label)}</td>
+    <td>${r.action_completion_rate!==''?r.action_completion_rate+'%':'—'}</td>
+    <td>${esc((r.summary_comment||'').slice(0,60))}</td></tr>`).join('');
+}
+
+function showPdcaDetailModal(index) {
+  const r = (state.pdcaHistory||[])[index];
+  if (!r) return;
+  showModal(`📈 PDCAレビュー（${esc(r.period_label)} / ${fmtDate(r.created_at)}）`, renderPdcaCards(r), null, null);
+}
+
+function renderPdcaCards(r) {
+  let recurringThemes = [], actList = [];
+  const openActions = r.open_actions || [];
+  try { recurringThemes = JSON.parse(r.recurring_themes_json || '[]'); } catch(e) {}
+  try { actList = JSON.parse(r.act_json || '[]'); } catch(e) {}
+
+  const statCard = (label, value) => `<div style="background:#F8FAFC;border-radius:8px;padding:10px 12px;text-align:center">
+    <div style="font-size:18px;font-weight:800;color:var(--primary)">${value}</div>
+    <div style="font-size:11px;color:var(--gray);margin-top:2px">${label}</div></div>`;
+
+  const quad = (title, color, text) => `<div style="background:${color}1a;border-left:4px solid ${color};border-radius:6px;padding:12px 14px">
+    <div style="font-weight:700;font-size:12px;color:${color};margin-bottom:4px">${title}</div>
+    <div style="font-size:12.5px;line-height:1.7;white-space:pre-wrap">${esc(text || '情報不足')}</div></div>`;
+
+  return `
+    ${r.summary_comment ? `<div style="background:#EEF0FE;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-weight:600;font-size:13px">💬 ${esc(r.summary_comment)}</div>` : ''}
+
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px">
+      ${statCard('議事録', r.meeting_count)}
+      ${statCard('活動記録', r.activity_count)}
+      ${statCard('受注', (r.won_count||0)+'件')}
+      ${statCard('提案アクション完了率', r.action_completion_rate!==''&&r.action_completion_rate!==undefined?r.action_completion_rate+'%':'—')}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">
+      ${quad('Plan（注力すべきテーマ）', '#4F6EF7', r.plan)}
+      ${quad('Do（実施した活動）', '#0E9F6E', r.do_text)}
+      ${quad('Check（繰り返す課題・進捗）', '#D97706', r.check_text)}
+      <div style="background:#E024241a;border-left:4px solid #E02424;border-radius:6px;padding:12px 14px">
+        <div style="font-weight:700;font-size:12px;color:#E02424;margin-bottom:4px">Act（次の改善アクション）</div>
+        ${actList.length ? `<ul style="padding-left:16px;font-size:12.5px;line-height:1.7">${actList.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>` : `<div style="font-size:12.5px">情報不足</div>`}
+      </div>
+    </div>
+
+    ${recurringThemes.length ? `
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">🔁 繰り返し現れた課題テーマ</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px">
+      ${recurringThemes.map(t => `<span class="badge" style="background:#F3F4F6;color:#374151">${esc(t.theme)} ×${t.count}</span>`).join('')}
+    </div>` : ''}
+
+    ${openActions.length ? `
+    <div style="font-weight:700;font-size:13px;margin-bottom:6px">📋 未完了の提案アクション（顧客分析より）</div>
+    <ul style="padding-left:18px;font-size:12.5px;line-height:1.8;color:var(--mid)">${openActions.map(a=>`<li>${esc(a)}</li>`).join('')}</ul>` : ''}
+  `;
 }
 
 // ── モーダル: 顧客追加 ────────────────────────────────────

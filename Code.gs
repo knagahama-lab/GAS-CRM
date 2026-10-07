@@ -110,6 +110,12 @@ function _dispatchAction(action, data) {
     case 'toggleInsightAction':     return toggleInsightAction(data);
     case 'deleteInsight':           return deleteInsight(data.insight_id);
 
+    // ── 営業担当者別PDCAレビュー ──────────────────────────────
+    case 'generateRepPdcaReview':   return generateRepPdcaReview(data);
+    case 'getRepPdcaReviews':       return getRepPdcaReviews(data.assigned_user);
+    case 'getLatestRepPdcaReview':  return getLatestRepPdcaReview(data.assigned_user);
+    case 'runInsightRefreshNow':    return (refreshStaleCustomerInsightsTrigger(), successResponse({ done: true }));
+
     // ── メール ────────────────────────────────
     case 'sendEmail':         return sendEmail(data);
     case 'getEmailHistory':   return getEmailHistory(data.customer_id);
@@ -149,7 +155,8 @@ function _dispatchAction(action, data) {
  * 画面初期表示に必要なデータを一括取得
  */
 function _getInitData(userEmail) {
-  ensureMeetingsSetup(); // 議事録AI機能を追加する前に構築済みのシートへの自動マイグレーション
+  ensureMeetingsSetup();      // 議事録AI機能を追加する前に構築済みのシートへの自動マイグレーション
+  ensureInsightReviewSetup(); // 顧客分析AI・PDCAレビュー機能を追加する前に構築済みのシートへの自動マイグレーション
   const user = getCurrentUser();
   const settings = getAllSettings();
   const kpi = JSON.parse(getKpiSummary());
