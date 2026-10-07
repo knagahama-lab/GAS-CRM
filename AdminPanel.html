@@ -73,6 +73,7 @@ tr:hover td { background: #FAFBFF; }
     <div class="tab" onclick="switchTab('report')">📊 レポート設定</div>
     <div class="tab" onclick="switchTab('meetings')">🎙️ 議事録AI</div>
     <div class="tab" onclick="switchTab('system')">🖥️ システム</div>
+    <div class="tab" onclick="switchTab('import')">📥 データ移行</div>
   </div>
 
   <!-- 機能設定 -->
@@ -228,6 +229,36 @@ tr:hover td { background: #FAFBFF; }
           <button class="btn btn-danger" onclick="if(confirm('トリガーを再設定してよいですか？'))resetTriggers()">⚠️ 全トリガー削除・再設定</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- データ移行 -->
+  <div class="panel" id="panel-import">
+    <div class="card">
+      <h3>📥 CSVデータ移行</h3>
+      <p style="font-size:13px;color:#6B7280;margin-bottom:16px">
+        他システムからエクスポートしたCSVを、各シートの列名（customer_id, deal_name 等）に合わせて用意しアップロードしてください。
+        列の並び順が違っても列名で自動マッピングします。既存の主キー（customer_id / deal_id / activity_id）と重複する行は自動でスキップされるため、同じファイルを誤って複数回実行しても二重登録されません。
+      </p>
+      <div class="form-group">
+        <label class="form-label">① 顧客CSV（👥 Customers シート形式）</label>
+        <input type="file" id="imp-customers-file" accept=".csv">
+        <button class="btn btn-primary" style="margin-top:8px" onclick="runImport('customers')">インポート実行</button>
+        <div id="imp-customers-status" style="font-size:12px;color:#6B7280;margin-top:6px"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">② 商談CSV（💼 Deals シート形式）</label>
+        <input type="file" id="imp-deals-file" accept=".csv">
+        <button class="btn btn-primary" style="margin-top:8px" onclick="runImport('deals')">インポート実行</button>
+        <div id="imp-deals-status" style="font-size:12px;color:#6B7280;margin-top:6px"></div>
+      </div>
+      <div class="form-group">
+        <label class="form-label">③ 活動CSV（📝 Activities シート形式）</label>
+        <input type="file" id="imp-activities-file" accept=".csv">
+        <button class="btn btn-primary" style="margin-top:8px" onclick="runImport('activities')">インポート実行</button>
+        <div id="imp-activities-status" style="font-size:12px;color:#6B7280;margin-top:6px"></div>
+      </div>
+      <p style="font-size:12px;color:#9CA3AF">顧客→商談→活動 の順でインポートしてください（商談・活動が顧客IDを参照するため）。</p>
     </div>
   </div>
 </div>
@@ -443,6 +474,34 @@ function runEmailScan() {
     .scanEmails();
 }
 
+// ── CSVデータ移行 ──
+function runImport(kind) {
+  const fileInput = document.getElementById(`imp-${kind}-file`);
+  const statusEl = document.getElementById(`imp-${kind}-status`);
+  const file = fileInput.files[0];
+  if (!file) { statusEl.textContent = '⚠️ ファイルを選択してください'; return; }
+
+  statusEl.textContent = 'インポート中…';
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const csvText = e.target.result;
+    const actionMap = { customers: 'importCustomersCsv', deals: 'importDealsCsv', activities: 'importActivitiesCsv' };
+    google.script.run
+      .withSuccessHandler(res => {
+        const parsed = typeof res === 'string' ? JSON.parse(res) : res;
+        if (!parsed.success) { statusEl.textContent = '❌ ' + parsed.error; return; }
+        const d = parsed.data;
+        let msg = `✅ ${d.imported}件インポートしました（重複スキップ${d.duplicate}件 / 不正${d.skipped}件 / CSV全${d.total}件中）`;
+        if (d.unknownColumns && d.unknownColumns.length) msg += ` ｜ 未対応の列: ${d.unknownColumns.join(', ')}`;
+        statusEl.textContent = msg;
+      })
+      .withFailureHandler(err => { statusEl.textContent = '❌ ' + err.message; })
+      .serverAction(actionMap[kind], { csvText });
+  };
+  reader.onerror = () => { statusEl.textContent = '❌ ファイルの読み込みに失敗しました'; };
+  reader.readAsText(file, 'UTF-8');
+}
+
 function runInsightRefresh() {
   showToast('顧客分析を一括更新しています…', 'success');
   google.script.run
@@ -458,7 +517,7 @@ function runInsightRefresh() {
 // ── タブ ──
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach((t,i) => {
-    const names = ['features','users','report','meetings','system'];
+    const names = ['features','users','report','meetings','system','import'];
     t.classList.toggle('active', names[i] === name);
   });
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));

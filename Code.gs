@@ -122,6 +122,11 @@ function _dispatchAction(action, data) {
     case 'generateTargetList': return generateTargetList(data);
     case 'askAiAssistant':     return runAiAssistantQuery(data.question);
 
+    // ── CSVデータ移行（管理者のみ） ──────────────────────────
+    case 'importCustomersCsv':  return importCustomersCsv(data.csvText);
+    case 'importDealsCsv':      return importDealsCsv(data.csvText);
+    case 'importActivitiesCsv': return importActivitiesCsv(data.csvText);
+
     // ── メール ────────────────────────────────
     case 'sendEmail':         return sendEmail(data);
     case 'getEmailHistory':   return getEmailHistory(data.customer_id);
