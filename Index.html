@@ -747,16 +747,47 @@ function showRecordMeetingModal() {
       <div id="rec-status" style="color:var(--gray);font-size:13px;margin-bottom:18px">マイクへのアクセスを許可し、録音を開始してください</div>
       <button class="btn btn-primary" id="rec-start-btn" onclick="startRecording()">● 録音開始</button>
       <button class="btn btn-danger" id="rec-stop-btn" style="display:none" onclick="stopRecordingAndUpload()">■ 停止してAI解析</button>
+      <a class="btn btn-outline" id="rec-open-top" href="#" target="_blank" rel="noopener" style="display:none;margin-top:10px">↗ 新しいタブで開く</a>
     </div>
     <p style="font-size:12px;color:var(--gray)">※ 録音データはGoogleドライブに保存され、Gemini AIで文字起こし・要約されます。長時間の録音は分割して録音してください（目安30分以内）。</p>
   `, null, null);
 }
 
 async function startRecording() {
+  // Apps Scriptエディタのプレビュー等、iframe内で開かれているとマイク権限が
+  // ブラウザから委譲されず必ず失敗するため、トップフレームで開き直すよう促す
+  if (window.self !== window.top) {
+    showError('録音機能はApps Scriptエディタのプレビュー内では使用できません。「新しいタブで開く」ボタンを押してやり直してください。');
+    google.script.run
+      .withSuccessHandler(url => { const a = document.getElementById('rec-open-top'); if (a) { a.href = url; a.style.display = 'inline-flex'; } })
+      .withFailureHandler(() => {})
+      .getWebAppUrl();
+    return;
+  }
+  if (!window.isSecureContext) {
+    showError('録音にはHTTPS接続が必要です。公開されたWebアプリのURL（https://...）から開き直してください。');
+    return;
+  }
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    showError('このブラウザは録音機能に対応していません。Google ChromeまたはMicrosoft Edgeの最新版でお試しください。');
+    return;
+  }
   try {
     _mr.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
   } catch (e) {
-    showError('マイクにアクセスできませんでした: ' + e.message);
+    let msg = 'マイクにアクセスできませんでした。';
+    if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+      msg += ' ブラウザのアドレスバー左側のアイコンからこのサイトのマイク権限を「許可」にし、ページを再読み込みしてください。';
+    } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
+      msg += ' マイクが見つかりません。PCにマイクが接続・認識されているかご確認ください。';
+    } else if (e.name === 'NotReadableError' || e.name === 'TrackStartError') {
+      msg += ' 他のアプリ（Zoom/Teams等）がマイクを使用中の可能性があります。他のアプリを閉じてから再度お試しください。';
+    } else if (e.name === 'SecurityError') {
+      msg += ' セキュリティ制限によりブロックされました。CRMを新しいタブで直接開いてお試しください。';
+    } else {
+      msg += `（${e.name || 'Error'}: ${e.message || e}）`;
+    }
+    showError(msg);
     return;
   }
   _mr.chunks = [];
