@@ -9,6 +9,54 @@
 
 const MEETINGS_SHEET = '🎙️ Meetings';
 
+// ── 既存デプロイへの自動マイグレーション ─────────────────────
+// 議事録AI機能のリリース前に setupCRM() 済みのスプレッドシートには
+// Meetingsシートや新設定キーが存在しない。既存データを一切削除せず、
+// 不足分だけを安全に追加する。画面初期表示のたびに呼ばれる想定（コストは軽微）。
+
+function ensureMeetingsSetup() {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let settingsChanged = false;
+
+    // Meetingsシートが無ければ新規作成のみ行う（既存シートには一切触れない）
+    if (!ss.getSheetByName(MEETINGS_SHEET)) {
+      const sheet = ss.insertSheet(MEETINGS_SHEET);
+      const headers = ['meeting_id','title','meeting_date','source','audio_file_id','audio_file_name',
+        'duration_sec','status','customer_id','deal_id','company_name_guess','project_name_guess',
+        'transcript','summary','extracted_json','next_action','next_action_date','amount_guess',
+        'assigned_user','error_message','created_at','updated_at'];
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+        .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
+      sheet.autoResizeColumns(1, headers.length);
+      logInfo('Meetings シートを自動補完作成しました');
+    }
+
+    // Settingsシートに新設定キーが無ければ末尾に追記する（既存行は一切変更しない）
+    const settingsSheet = ss.getSheetByName(SETTINGS_SHEET);
+    if (settingsSheet) {
+      const data = settingsSheet.getDataRange().getValues();
+      const existingKeys = data.slice(1).map(r => r[0]);
+      const defaults = [
+        ['FEATURE_MEETINGS',      'TRUE', now(), '', '議事録AI（録音からの文字起こし・CRM自動反映）'],
+        ['RECORDING_FOLDER_ID',   '',     now(), '', '議事録AI：録音データを監視するDriveフォルダID（空欄なら自動作成フォルダを使用）'],
+        ['GEMINI_MODEL',          'gemini-2.5-flash', now(), '', '議事録AI：使用するGeminiモデル名'],
+        ['MEETING_SCAN_INTERVAL', '10',   now(), '', '議事録AI：フォルダ監視の実行間隔（分）'],
+      ];
+      const missing = defaults.filter(d => existingKeys.indexOf(d[0]) === -1);
+      if (missing.length) {
+        settingsSheet.getRange(settingsSheet.getLastRow() + 1, 1, missing.length, missing[0].length).setValues(missing);
+        settingsChanged = true;
+        logInfo(`Settings に議事録AI設定キーを自動補完しました: ${missing.map(m => m[0]).join(', ')}`);
+      }
+    }
+
+    if (settingsChanged) _clearCache();
+  } catch (e) {
+    logError('議事録AIの自動セットアップ補完に失敗しました', e);
+  }
+}
+
 // ── 録音アップロード（ブラウザ録音） ──────────────────────────
 
 function uploadMeetingRecording(data) {

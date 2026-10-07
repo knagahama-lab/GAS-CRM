@@ -142,6 +142,7 @@ function _dispatchAction(action, data) {
  * 画面初期表示に必要なデータを一括取得
  */
 function _getInitData(userEmail) {
+  ensureMeetingsSetup(); // 議事録AI機能を追加する前に構築済みのシートへの自動マイグレーション
   const user = getCurrentUser();
   const settings = getAllSettings();
   const kpi = JSON.parse(getKpiSummary());
