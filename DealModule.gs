@@ -142,6 +142,12 @@ function updateDealPhase(id, phase) {
         activity_date: now(),
       });
     }
+
+    // 受注時、紐付く議事録を「成功事例」としてフラグ（商談採点AIの参考事例として蓄積）
+    if (phase === 'CLOSED_WON' && typeof _markMeetingsAsSuccessCase === 'function') {
+      _markMeetingsAsSuccessCase(id);
+    }
+
     logInfo(`フェーズ更新: ${id} → ${phase}`);
     return successResponse({ deal_id: id, phase });
   });

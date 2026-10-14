@@ -35,7 +35,7 @@ function _getGeminiApiKey() {
 /**
  * 音声Blobを渡すと、文字起こし・要約・CRM項目候補をJSONで返す
  */
-function transcribeAndExtractAudio(audioBlob) {
+function transcribeAndExtractAudio(audioBlob, glossaryTerms) {
   const apiKey = _getGeminiApiKey();
   if (!apiKey) {
     throw new Error('Gemini APIキーが未設定です。管理画面「議事録AI」タブから設定してください。');
@@ -52,10 +52,15 @@ function transcribeAndExtractAudio(audioBlob) {
   const base64Audio = Utilities.base64Encode(bytes);
   const mimeType = audioBlob.getContentType() || 'audio/webm';
 
+  const glossaryBlock = (glossaryTerms && glossaryTerms.length)
+    ? ['', '以下は自社の専門用語・製品名・固有名詞の一覧です。文字起こしの際、発音が近い語が出てきたらこれらの正しい表記を優先してください（無理に当てはめないこと）:', ...glossaryTerms.map(t => `・${t}`)]
+    : [];
+
   const prompt = [
     'あなたは日本企業の営業商談・打ち合わせの音声を解析する専門アシスタントです。',
     '添付された音声を文字起こしし、話者を「話者A」「話者B」のように分離してください。',
     '聞き取れない箇所は[不明瞭]と記載し、絶対に内容を創作しないでください。',
+    ...glossaryBlock,
     '',
     '出力は以下のキーを持つJSONオブジェクト1つのみとし、説明文やコードブロック記法は付けないでください。',
     '抽出できない・自信がない項目は空文字（amount_guessは空文字または数値）にしてください。推測で埋めないこと。',
@@ -448,4 +453,154 @@ function askCrmAssistantAI(context, question) {
   }
 
   return { answer: extracted.answer || '', table: Array.isArray(extracted.table) ? extracted.table : [] };
+}
+
+/**
+ * 商談採点AI - 「商談内容の採点」ステップ。
+ * 過去の成功事例（受注に至った商談の要約）と照らし、ヒアリング力・提案力・
+ * 次回アクションの明確さ・関係構築の4軸で採点する。育成（スコアリング→振り返り）に活用する。
+ */
+function scoreMeetingAI(context) {
+  const apiKey = _getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('Gemini APIキーが未設定です。管理画面「議事録AI」タブから設定してください。');
+  }
+
+  const model = getSetting('GEMINI_MODEL', 'gemini-2.5-flash');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const successText = (context.successExamples || [])
+    .map((s, i) => `[成功事例${i + 1}] ${s.company || ''}: ${s.summary || ''}`).join('\n') || '（参考にできる成功事例はまだ登録されていません）';
+
+  const prompt = [
+    'あなたは営業マネージャーとして、商談の議事録を採点するコーチです。',
+    '以下は今回の商談の要約・文字起こしです。過去に受注へつながった商談（成功事例）も参考に、',
+    '今回の商談を下記4つの観点で0〜100点で採点し、具体的なコメントを付けてください。',
+    '',
+    '採点観点:',
+    '- hearing_score: ヒアリング力（顧客の課題・ウォンツをどれだけ引き出せているか）',
+    '- proposal_score: 提案力（顧客の課題に対する提案がどれだけ具体的か）',
+    '- next_action_score: 次回アクションの明確さ（次に何をするか合意できているか）',
+    '- relationship_score: 関係構築（雑談・信頼構築の様子が伺えるか）',
+    '',
+    '厳守事項: 文字起こし・要約に無い内容を創作しないこと。情報が乏しい観点は点数を低めにし、理由をコメントに書くこと。',
+    '',
+    '【今回の商談】',
+    `会社名: ${context.companyName || '不明'}`,
+    `要約: ${context.summary || '(なし)'}`,
+    `文字起こし抜粋: ${(context.transcript || '(なし)').slice(0, 4000)}`,
+    '',
+    '【過去の成功事例（受注に至った商談の要約、参考情報）】',
+    successText,
+    '',
+    '出力は以下のキーを持つJSONオブジェクト1つのみとし、説明文やコードブロック記法は付けないこと:',
+    '{',
+    '  "hearing_score": 0,',
+    '  "proposal_score": 0,',
+    '  "next_action_score": 0,',
+    '  "relationship_score": 0,',
+    '  "total_score": 0,',
+    '  "comment": "総評（良かった点・改善点を具体的に）",',
+    '  "compared_to_success_cases": "成功事例と比較しての気づき（参考にできる成功事例が無ければ「情報不足」）"',
+    '}',
+  ].join('\n');
+
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },
+  };
+
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify(payload), muteHttpExceptions: true,
+  });
+
+  const code = res.getResponseCode();
+  const body = res.getContentText();
+  if (code !== 200) {
+    logError('Gemini APIエラー（商談採点）', { message: `HTTP ${code}: ${body.substring(0, 500)}` });
+    throw new Error(`商談採点でエラーが発生しました（HTTP ${code}）。`);
+  }
+
+  let json;
+  try { json = JSON.parse(body); } catch (e) { throw new Error('Gemini応答の解析に失敗しました。'); }
+  const candidate = json.candidates && json.candidates[0];
+  const text = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text;
+  if (!text) throw new Error('AIから有効な応答が得られませんでした。');
+
+  let extracted;
+  try { extracted = JSON.parse(text); } catch (e) { throw new Error('AI出力のJSON解析に失敗しました: ' + e.message); }
+  return extracted;
+}
+
+/**
+ * 次回提案サジェストAI - 「次回の商談内容を提案」ステップ。
+ * 自社の商品DBを参照し、今回の商談内容を踏まえて次回提案すべき内容・商品・
+ * 確認ポイントを提案する。提案書作成のたたき台として使う。
+ */
+function suggestNextMeetingAI(context) {
+  const apiKey = _getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('Gemini APIキーが未設定です。管理画面「議事録AI」タブから設定してください。');
+  }
+
+  const model = getSetting('GEMINI_MODEL', 'gemini-2.5-flash');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const productsText = (context.products || [])
+    .map(p => `・${p.name}（${p.category || ''}）: ${p.description || ''} / 想定用途: ${p.target_use || ''}`).join('\n') || '（商品DBが未登録です）';
+
+  const prompt = [
+    'あなたは営業アシスタントです。以下の商談内容と自社の商品情報（商品DB）を踏まえて、',
+    '次回の商談で提案すべき内容を具体的に提案してください。',
+    '',
+    '厳守事項: 商品DBに無い製品を創作しないこと。該当する商品が無ければ recommended_products を空配列にすること。',
+    '商品DBが未登録の場合は、商談内容から読み取れる一般的な次アクションの提案に留めること。',
+    '',
+    '【今回の商談】',
+    `会社名: ${context.companyName || '不明'}`,
+    `要約: ${context.summary || '(なし)'}`,
+    `合意済みの次回アクション: ${context.nextAction || '(なし)'}`,
+    '',
+    '【自社の商品DB】',
+    productsText,
+    '',
+    '出力は以下のキーを持つJSONオブジェクト1つのみとし、説明文やコードブロック記法は付けないこと:',
+    '{',
+    '  "next_proposal": "次回の商談・提案で伝えるべき内容（具体的に）",',
+    '  "recommended_products": ["商品DBに実在する商品名のみ"],',
+    '  "talking_points": ["次回の商談で確認・提案すべきポイント"]',
+    '}',
+  ].join('\n');
+
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },
+  };
+
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify(payload), muteHttpExceptions: true,
+  });
+
+  const code = res.getResponseCode();
+  const body = res.getContentText();
+  if (code !== 200) {
+    logError('Gemini APIエラー（次回提案サジェスト）', { message: `HTTP ${code}: ${body.substring(0, 500)}` });
+    throw new Error(`次回提案の生成でエラーが発生しました（HTTP ${code}）。`);
+  }
+
+  let json;
+  try { json = JSON.parse(body); } catch (e) { throw new Error('Gemini応答の解析に失敗しました。'); }
+  const candidate = json.candidates && json.candidates[0];
+  const text = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text;
+  if (!text) throw new Error('AIから有効な応答が得られませんでした。');
+
+  let extracted;
+  try { extracted = JSON.parse(text); } catch (e) { throw new Error('AI出力のJSON解析に失敗しました: ' + e.message); }
+  return {
+    next_proposal: extracted.next_proposal || '',
+    recommended_products: Array.isArray(extracted.recommended_products) ? extracted.recommended_products : [],
+    talking_points: Array.isArray(extracted.talking_points) ? extracted.talking_points : [],
+  };
 }

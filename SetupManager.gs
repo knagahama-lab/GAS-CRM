@@ -19,6 +19,8 @@ function setupCRM() {
     _createDealsSheet(ss);
     _createActivitiesSheet(ss);
     _createMeetingsSheet(ss);
+    _createGlossarySheet(ss);
+    _createProductDbSheet(ss);
     _createInsightsSheet(ss);
     _createPdcaReviewsSheet(ss);
     _createEmailTrackingSheet(ss);
@@ -72,6 +74,7 @@ function _createSettingsSheet(ss) {
     ['FEATURE_KANBAN',      'TRUE',  now(), '', 'カンバンボード'],
     ['FEATURE_SEARCH',      'TRUE',  now(), '', 'グローバル検索'],
     ['FEATURE_MEETINGS',    'TRUE',  now(), '', '議事録AI（録音からの文字起こし・CRM自動反映）'],
+    ['FEATURE_MEETING_SCORING','TRUE', now(), '', '商談採点AI・次回提案サジェスト（成功事例比較・商品DB参照）'],
     ['RECORDING_FOLDER_ID', '',      now(), '', '議事録AI：録音データを監視するDriveフォルダID（空欄なら自動作成フォルダを使用）'],
     ['GEMINI_MODEL',        'gemini-2.5-flash', now(), '', '議事録AI：使用するGeminiモデル名'],
     ['MEETING_SCAN_INTERVAL','10',   now(), '', '議事録AI：フォルダ監視の実行間隔（分）'],
@@ -224,12 +227,37 @@ function _createMeetingsSheet(ss) {
   const headers = ['meeting_id','title','meeting_date','source','audio_file_id','audio_file_name',
     'duration_sec','status','customer_id','deal_id','company_name_guess','project_name_guess',
     'transcript','summary','extracted_json','next_action','next_action_date','amount_guess',
-    'assigned_user','error_message','created_at','updated_at'];
+    'assigned_user','error_message','created_at','updated_at',
+    'score_json','score_total','next_proposal_json','is_success_case'];
 
   sheet.getRange(1, 1, 1, headers.length).setValues([headers])
     .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
   _autoResizeColumns(sheet);
   logInfo('Meetings シート作成完了');
+}
+
+function _createGlossarySheet(ss) {
+  let sheet = ss.getSheetByName('📚 Glossary');
+  if (sheet) ss.deleteSheet(sheet);
+  sheet = ss.insertSheet('📚 Glossary');
+
+  const headers = ['term', 'reading', 'definition', 'category'];
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+    .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
+  _autoResizeColumns(sheet);
+  logInfo('Glossary シート作成完了');
+}
+
+function _createProductDbSheet(ss) {
+  let sheet = ss.getSheetByName('📦 ProductDB');
+  if (sheet) ss.deleteSheet(sheet);
+  sheet = ss.insertSheet('📦 ProductDB');
+
+  const headers = ['product_id', 'product_name', 'category', 'description', 'features', 'target_use', 'created_at'];
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+    .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
+  _autoResizeColumns(sheet);
+  logInfo('ProductDB シート作成完了');
 }
 
 function _createInsightsSheet(ss) {

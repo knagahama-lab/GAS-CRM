@@ -100,6 +100,7 @@ function _dispatchAction(action, data) {
     case 'retryMeetingProcessing': return retryMeetingProcessing(data.meeting_id);
     case 'deleteMeeting':          return deleteMeeting(data.meeting_id);
     case 'scanRecordingFolder':    return scanRecordingFolder();
+    case 'rescoreMeeting':         return rescoreMeeting(data.meeting_id);
     case 'setGeminiApiKey':        return setGeminiApiKey(data.apiKey);
     case 'hasGeminiApiKey':        return hasGeminiApiKey();
 

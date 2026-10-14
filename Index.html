@@ -736,9 +736,76 @@ function showMeetingDetailModal(m) {
     </div>
     ${m.status==='ERROR' ? `<div style="padding:10px 14px;background:#FEF2F2;color:#991B1B;border-radius:8px;margin-bottom:14px;font-size:13px">${esc(m.error_message||'処理に失敗しました')}</div>` : ''}
     <div class="form-group"><label class="form-label">要約</label><div style="padding:10px 12px;background:#FAFAFA;border-radius:8px;font-size:13px;line-height:1.6">${esc(m.summary||'—')}</div></div>
+    <div id="mdl-score-area">${renderScoreAndSuggestionHtml(m)}</div>
     <div class="form-group"><label class="form-label">文字起こし全文</label>
       <pre style="white-space:pre-wrap;font-family:inherit;max-height:280px;overflow-y:auto;background:#FAFAFA;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12.5px;line-height:1.7">${esc(m.transcript||'（文字起こしがありません）')}</pre>
     </div>`, null, null);
+}
+
+// ── 商談採点レポート・次回提案サジェスト（表示） ─────────────
+function renderScoreAndSuggestionHtml(m, containerId) {
+  containerId = containerId || 'mdl-score-area';
+  if (!m.score_json && !m.next_proposal_json) {
+    if (!m.extracted_json) return '';
+    return `<div class="form-group">
+      <button class="btn btn-outline btn-sm" onclick="runRescoreMeeting('${m.meeting_id}','${containerId}')">📊 採点・次回提案を生成</button>
+    </div>`;
+  }
+
+  let score = null, suggestion = null;
+  try { score = m.score_json ? JSON.parse(m.score_json) : null; } catch(e) {}
+  try { suggestion = m.next_proposal_json ? JSON.parse(m.next_proposal_json) : null; } catch(e) {}
+
+  const scoreBar = (label, value) => `
+    <div style="margin-bottom:8px">
+      <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:2px"><span>${label}</span><span style="font-weight:700">${value}</span></div>
+      <div style="background:#F3F4F6;border-radius:6px;height:10px;overflow:hidden"><div style="background:var(--primary);height:100%;width:${value}%"></div></div>
+    </div>`;
+
+  const scoreHtml = score ? `
+    <div class="form-group">
+      <label class="form-label">📊 商談採点レポート</label>
+      <div style="background:#FAFAFA;border:1px solid var(--border);border-radius:8px;padding:14px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+          <div style="font-size:26px;font-weight:800;color:var(--primary)">${score.total_score ?? '—'}</div>
+          <div style="font-size:11px;color:var(--gray)">/ 100点（総合）</div>
+        </div>
+        ${scoreBar('ヒアリング力', score.hearing_score ?? 0)}
+        ${scoreBar('提案力', score.proposal_score ?? 0)}
+        ${scoreBar('次回アクション', score.next_action_score ?? 0)}
+        ${scoreBar('関係構築', score.relationship_score ?? 0)}
+        <div style="font-size:12.5px;margin-top:10px;line-height:1.6">${esc(score.comment||'')}</div>
+        ${score.compared_to_success_cases ? `<div style="font-size:11.5px;color:var(--gray);margin-top:6px">成功事例比較: ${esc(score.compared_to_success_cases)}</div>` : ''}
+      </div>
+    </div>` : '';
+
+  const suggestionHtml = suggestion ? `
+    <div class="form-group">
+      <label class="form-label">💡 次回の商談提案</label>
+      <div style="background:#EEF0FE;border-radius:8px;padding:12px 14px;font-size:12.5px;line-height:1.7">${esc(suggestion.next_proposal||'')}</div>
+      ${(suggestion.recommended_products||[]).length ? `<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px">${suggestion.recommended_products.map(p=>`<span class="badge" style="background:#F3F4F6;color:#374151">${esc(p)}</span>`).join('')}</div>` : ''}
+      ${(suggestion.talking_points||[]).length ? `<ul style="padding-left:18px;font-size:12px;line-height:1.7;margin-top:8px">${suggestion.talking_points.map(t=>`<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+    </div>` : '';
+
+  return scoreHtml + suggestionHtml;
+}
+
+async function runRescoreMeeting(meetingId, containerId) {
+  containerId = containerId || 'mdl-score-area';
+  const area = document.getElementById(containerId);
+  if (area) area.innerHTML = `<div class="loading" style="padding:20px"><div class="spinner" style="width:22px;height:22px"></div><span style="font-size:12px">採点・次回提案を生成しています…</span></div>`;
+  const res = await call('rescoreMeeting', { meeting_id: meetingId });
+  if (!res) { if (area) area.innerHTML = ''; return; }
+  showSuccess('採点・次回提案を生成しました');
+  if (area) area.innerHTML = renderScoreAndSuggestionHtml(res, containerId);
+}
+
+function switchReviewTab(name) {
+  ['summary','score','transcript'].forEach(n => {
+    const el = document.getElementById('mr-tab-' + n);
+    if (el) el.style.display = (n === name) ? 'block' : 'none';
+  });
+  document.querySelectorAll('[data-rtab]').forEach(el => el.classList.toggle('active', el.dataset.rtab === name));
 }
 
 // ── 録音モーダル（ブラウザでマイク録音） ───────────────────
@@ -880,8 +947,9 @@ async function showMeetingReviewModal(m, candidates) {
 
   showModal(`📋 転記案の確認: ${esc(m.title)}`, `
     <div class="tabs">
-      <div class="tab active" onclick="switchTab(this,'mr-tab-summary','mr-tab-transcript')">確認・紐付け</div>
-      <div class="tab" onclick="switchTab(this,'mr-tab-transcript','mr-tab-summary')">文字起こし全文</div>
+      <div class="tab active" data-rtab="summary" onclick="switchReviewTab('summary')">確認・紐付け</div>
+      <div class="tab" data-rtab="score" onclick="switchReviewTab('score')">📊 採点・次回提案</div>
+      <div class="tab" data-rtab="transcript" onclick="switchReviewTab('transcript')">文字起こし全文</div>
     </div>
     <div id="mr-tab-summary">
       <div style="padding:10px 14px;background:#EFF6FF;color:#1E40AF;border-radius:8px;margin-bottom:14px;font-size:12.5px">
@@ -923,6 +991,7 @@ async function showMeetingReviewModal(m, candidates) {
         <div class="form-group"><label class="form-label">次回予定日</label><input class="form-control" id="mr-nextdate" type="date" value="${esc(m.next_action_date||'')}"></div>
       </div>
     </div>
+    <div id="mr-tab-score" style="display:none" data-meeting-id="${m.meeting_id}">${renderScoreAndSuggestionHtml(m, 'mr-tab-score')}</div>
     <div id="mr-tab-transcript" style="display:none">
       <pre style="white-space:pre-wrap;font-family:inherit;max-height:360px;overflow-y:auto;background:#FAFAFA;border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12.5px;line-height:1.7">${esc(m.transcript||'（文字起こしがありません）')}</pre>
     </div>`,

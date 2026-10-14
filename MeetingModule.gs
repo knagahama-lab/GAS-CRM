@@ -8,6 +8,8 @@
  */
 
 const MEETINGS_SHEET = '🎙️ Meetings';
+const GLOSSARY_SHEET = '📚 Glossary';
+const PRODUCT_DB_SHEET = '📦 ProductDB';
 
 // ── 既存デプロイへの自動マイグレーション ─────────────────────
 // 議事録AI機能のリリース前に setupCRM() 済みのスプレッドシートには
@@ -30,6 +32,39 @@ function ensureMeetingsSetup() {
         .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
       sheet.autoResizeColumns(1, headers.length);
       logInfo('Meetings シートを自動補完作成しました');
+    }
+
+    // Meetingsシートに商談採点・次回提案AI用の列が無ければ末尾に追加する（既存列・データは一切変更しない）
+    const meetingsSheet = ss.getSheetByName(MEETINGS_SHEET);
+    if (meetingsSheet) {
+      const meetingHeaders = meetingsSheet.getRange(1, 1, 1, meetingsSheet.getLastColumn()).getValues()[0];
+      ['score_json', 'score_total', 'next_proposal_json', 'is_success_case'].forEach(col => {
+        if (meetingHeaders.indexOf(col) === -1) {
+          meetingsSheet.getRange(1, meetingsSheet.getLastColumn() + 1).setValue(col)
+            .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
+          logInfo(`Meetings シートに列を自動補完しました: ${col}`);
+        }
+      });
+    }
+
+    // Glossary（専門用語辞書）シートが無ければ新規作成のみ行う
+    if (!ss.getSheetByName(GLOSSARY_SHEET)) {
+      const sheet = ss.insertSheet(GLOSSARY_SHEET);
+      const headers = ['term', 'reading', 'definition', 'category'];
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+        .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
+      sheet.autoResizeColumns(1, headers.length);
+      logInfo('Glossary シートを自動補完作成しました');
+    }
+
+    // ProductDB（商品DB）シートが無ければ新規作成のみ行う
+    if (!ss.getSheetByName(PRODUCT_DB_SHEET)) {
+      const sheet = ss.insertSheet(PRODUCT_DB_SHEET);
+      const headers = ['product_id', 'product_name', 'category', 'description', 'features', 'target_use', 'created_at'];
+      sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+        .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
+      sheet.autoResizeColumns(1, headers.length);
+      logInfo('ProductDB シートを自動補完作成しました');
     }
 
     // Insightsシートが無ければ新規作成のみ行う（既存シートには一切触れない）
@@ -56,6 +91,7 @@ function ensureMeetingsSetup() {
         ['GEMINI_MODEL',          'gemini-2.5-flash', now(), '', '議事録AI：使用するGeminiモデル名'],
         ['MEETING_SCAN_INTERVAL', '10',   now(), '', '議事録AI：フォルダ監視の実行間隔（分）'],
         ['FEATURE_INSIGHTS',      'TRUE', now(), '', '顧客分析AI（SWOT/PEST/3C分析・仮説立案）'],
+        ['FEATURE_MEETING_SCORING','TRUE', now(), '', '商談採点AI・次回提案サジェスト（成功事例比較・商品DB参照）'],
       ];
       const missing = defaults.filter(d => existingKeys.indexOf(d[0]) === -1);
       if (missing.length) {
@@ -217,7 +253,8 @@ function _getRecordingFolder() {
 
 function _processMeeting(meetingId, blob) {
   try {
-    const extracted = transcribeAndExtractAudio(blob);
+    const glossaryTerms = _getGlossaryTerms();
+    const extracted = transcribeAndExtractAudio(blob, glossaryTerms);
     const matches = _findLinkCandidates(extracted);
 
     updateRow(MEETINGS_SHEET, 'meeting_id', meetingId, {
@@ -233,6 +270,14 @@ function _processMeeting(meetingId, blob) {
       updated_at: now(),
     });
 
+    if (isEnabled('FEATURE_MEETING_SCORING')) {
+      try {
+        _scoreAndSuggestForMeeting(meetingId, extracted);
+      } catch (e) {
+        logError(`商談採点・次回提案の生成に失敗: ${meetingId}`, e);
+      }
+    }
+
     logInfo(`議事録AI処理完了: ${meetingId}（候補${matches.length}件）`);
     const meeting = findRow(MEETINGS_SHEET, 'meeting_id', meetingId);
     return { meeting, extracted, candidates: matches };
@@ -244,6 +289,109 @@ function _processMeeting(meetingId, blob) {
     });
     logError(`議事録AI処理失敗: ${meetingId}`, e);
     throw e;
+  }
+}
+
+// ── 商談採点・次回提案サジェスト ──────────────────────────────
+// 「商談内容の採点（過去の成功事例と比較・育成に活用）」
+// 「次回の商談内容を提案（商品DBを参照・提案書に反映）」のステップ
+
+function _scoreAndSuggestForMeeting(meetingId, extracted) {
+  const successExamples = _getSuccessCaseSummaries(5);
+  const scoreResult = scoreMeetingAI({
+    transcript: extracted.transcript,
+    summary: extracted.summary,
+    companyName: extracted.company_name,
+    successExamples,
+  });
+
+  const products = _getProductDbList();
+  const suggestResult = suggestNextMeetingAI({
+    summary: extracted.summary,
+    companyName: extracted.company_name,
+    nextAction: extracted.next_action,
+    products,
+  });
+
+  updateRow(MEETINGS_SHEET, 'meeting_id', meetingId, {
+    score_json: JSON.stringify(scoreResult),
+    score_total: scoreResult.total_score !== undefined ? scoreResult.total_score : '',
+    next_proposal_json: JSON.stringify(suggestResult),
+  });
+
+  logInfo(`商談採点・次回提案サジェスト完了: ${meetingId}（総合点${scoreResult.total_score}）`);
+}
+
+/**
+ * 処理済みだが採点未実施の議事録を後から採点する（機能追加前のデータへの対応・再採点用）
+ */
+function rescoreMeeting(meetingId) {
+  return wrapAction(() => {
+    requireFeature('FEATURE_MEETINGS');
+    const meeting = findRow(MEETINGS_SHEET, 'meeting_id', meetingId);
+    if (!meeting) return errorResponse(`議事録ID「${meetingId}」が見つかりません。`);
+    if (!meeting.extracted_json) return errorResponse('文字起こしデータがまだありません。処理完了後に再度お試しください。');
+
+    let extracted;
+    try { extracted = JSON.parse(meeting.extracted_json); } catch (e) { return errorResponse('抽出データの解析に失敗しました。'); }
+
+    _scoreAndSuggestForMeeting(meetingId, extracted);
+    const updated = findRow(MEETINGS_SHEET, 'meeting_id', meetingId);
+    return successResponse(updated);
+  });
+}
+
+function _getGlossaryTerms() {
+  try {
+    return getSheetData(GLOSSARY_SHEET)
+      .filter(r => r.term)
+      .map(r => `${r.term}${r.reading ? '（' + r.reading + '）' : ''}: ${r.definition || ''}`)
+      .slice(0, 100);
+  } catch (e) {
+    return [];
+  }
+}
+
+function _getProductDbList() {
+  try {
+    return getSheetData(PRODUCT_DB_SHEET)
+      .filter(r => r.product_name)
+      .map(r => ({ name: r.product_name, category: r.category, description: r.description, target_use: r.target_use }));
+  } catch (e) {
+    return [];
+  }
+}
+
+function _getSuccessCaseSummaries(limit) {
+  try {
+    const data = getSheetData(MEETINGS_SHEET)
+      .filter(r => String(r.is_success_case).toUpperCase() === 'TRUE' && r.summary);
+    data.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    return data.slice(0, limit).map(r => ({ company: r.company_name_guess, summary: r.summary }));
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * 商談が受注（CLOSED_WON）になった際、紐付く議事録を「成功事例」としてフラグする。
+ * DealModule.gs の updateDealPhase から呼ばれる。
+ */
+function _markMeetingsAsSuccessCase(dealId) {
+  try {
+    const sheet = getSheet(MEETINGS_SHEET);
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const dealIdx = headers.indexOf('deal_id');
+    const successIdx = headers.indexOf('is_success_case');
+    if (dealIdx === -1 || successIdx === -1) return;
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][dealIdx] === dealId) {
+        sheet.getRange(i + 1, successIdx + 1).setValue('TRUE');
+      }
+    }
+  } catch (e) {
+    logError('成功事例フラグの更新に失敗しました', e);
   }
 }
 
