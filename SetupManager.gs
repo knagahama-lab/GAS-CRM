@@ -23,6 +23,7 @@ function setupCRM() {
     _createProductDbSheet(ss);
     _createInsightsSheet(ss);
     _createPdcaReviewsSheet(ss);
+    _createPriceNegotiationsSheet(ss);
     _createEmailTrackingSheet(ss);
     _createCalendarSheet(ss);
     _createTargetsSheet(ss);
@@ -83,6 +84,7 @@ function _createSettingsSheet(ss) {
     ['INSIGHT_AUTO_REFRESH','TRUE',  now(), '', '顧客分析AI：新しい議事録・活動がある顧客を定期的に自動再分析するか'],
     ['PDCA_AUTO_REVIEW',    'TRUE',  now(), '', 'PDCAレビュー：月次で全担当者分を自動生成・メール送信するか'],
     ['FEATURE_ANALYTICS',   'TRUE',  now(), '', '分析ラボ（要因ツリー・マトリックス・ターゲットリスト・AIアシスト）'],
+    ['FEATURE_PRICE_NEGOTIATION', 'TRUE', now(), '', '価格改定（値上げ）交渉支援AI'],
     ['EMAIL_SCAN_INTERVAL', '15',    now(), '', 'Gmailスキャン間隔（分）'],
     ['REPORT_RECIPIENTS',   Session.getActiveUser().getEmail(), now(), '', 'レポート送信先メール（カンマ区切り）'],
     ['REPORT_SCHEDULE',     'WEEKLY',now(), '', 'レポート頻度 DAILY/WEEKLY/MONTHLY'],
@@ -155,6 +157,13 @@ function _createMasterDataSheet(ss) {
     ['CAL_TYPE','FOLLOWUP','フォロー',2,'TRUE'],
     ['CAL_TYPE','DEMO','デモ',3,'TRUE'],
     ['CAL_TYPE','OTHER','その他',4,'TRUE'],
+    // 値上げ理由区分
+    ['PRICE_REASON','MATERIAL','原材料費高騰',1,'TRUE'],
+    ['PRICE_REASON','FX','為替変動',2,'TRUE'],
+    ['PRICE_REASON','ENERGY','エネルギー価格高騰',3,'TRUE'],
+    ['PRICE_REASON','LABOR','労務費上昇',4,'TRUE'],
+    ['PRICE_REASON','LOGISTICS','物流費上昇',5,'TRUE'],
+    ['PRICE_REASON','OTHER','その他',6,'TRUE'],
   ];
 
   sheet.getRange(1, 1, 1, headers.length).setValues([headers])
@@ -290,6 +299,22 @@ function _createPdcaReviewsSheet(ss) {
     .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
   _autoResizeColumns(sheet);
   logInfo('PdcaReviews シート作成完了');
+}
+
+function _createPriceNegotiationsSheet(ss) {
+  let sheet = ss.getSheetByName('💹 PriceNegotiations');
+  if (sheet) ss.deleteSheet(sheet);
+  sheet = ss.insertSheet('💹 PriceNegotiations');
+
+  const headers = ['negotiation_id', 'customer_id', 'deal_id', 'item_name',
+    'current_price', 'target_price', 'increase_rate', 'reason_category', 'reason_detail',
+    'status', 'strategy_json', 'letter_draft', 'agreed_price', 'agreed_date',
+    'assigned_user', 'created_at', 'updated_at'];
+
+  sheet.getRange(1, 1, 1, headers.length).setValues([headers])
+    .setBackground('#1A56DB').setFontColor('#FFFFFF').setFontWeight('bold');
+  _autoResizeColumns(sheet);
+  logInfo('PriceNegotiations シート作成完了');
 }
 
 function _createEmailTrackingSheet(ss) {

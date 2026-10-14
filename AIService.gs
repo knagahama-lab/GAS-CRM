@@ -604,3 +604,93 @@ function suggestNextMeetingAI(context) {
     talking_points: Array.isArray(extracted.talking_points) ? extracted.talking_points : [],
   };
 }
+
+/**
+ * 価格改定（値上げ）交渉支援AI
+ * 営業担当者が顧客へ価格改定を申し入れる際の、交渉戦略・想定問答・
+ * 譲歩案・案内文ドラフトを生成する。顧客との関係性情報（活動履歴・顧客分析）
+ * を踏まえ、関係維持を重視した誠実な交渉スタンスを基本とする。
+ */
+function generatePriceNegotiationStrategyAI(context) {
+  const apiKey = _getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('Gemini APIキーが未設定です。管理画面「議事録AI」タブから設定してください。');
+  }
+
+  const model = getSetting('GEMINI_MODEL', 'gemini-2.5-flash');
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const increaseRateText = context.increaseRate !== '' && context.increaseRate !== null && context.increaseRate !== undefined
+    ? `約${context.increaseRate}%` : '算出不可';
+
+  const prompt = [
+    'あなたは製造業の価格改定（値上げ）交渉を支援する専門アシスタントです。',
+    '営業担当者が顧客に価格改定を申し入れる際の交渉戦略・想定問答・案内文書を作成します。',
+    '',
+    '厳守事項:',
+    '- 入力データに無い事実（具体的な金額根拠、原価内訳、顧客の過去の発言内容など）を創作しないこと',
+    '- 顧客との関係性情報が乏しい場合は、一般的な価格交渉の原則に基づく内容とし、その旨を明記すること',
+    '- 誇張や過度な圧力を示唆する表現は避け、長期的な関係維持を重視した誠実な交渉スタンスを基本とすること',
+    '',
+    '【交渉対象】',
+    `顧客名: ${context.companyName || '不明'}`,
+    `対象製品・品目: ${context.itemName || '不明'}`,
+    `現行価格: ${context.currentPrice || '不明'}`,
+    `希望改定後価格: ${context.targetPrice || '不明'}（上昇率 ${increaseRateText}）`,
+    `値上げ理由区分: ${context.reasonCategory || '不明'}`,
+    `値上げ理由の詳細: ${context.reasonDetail || '(なし)'}`,
+    '',
+    '【顧客との関係性情報（分かる範囲で）】',
+    `取引ステータス: ${context.customerStatus || '不明'}`,
+    `最近のやり取り・商談要約: ${context.recentSummary || '(情報なし)'}`,
+    `顧客の課題・問題意識（顧客分析より）: ${context.problemAwareness || '(情報なし)'}`,
+    `過去の価格交渉履歴: ${context.pastNegotiations || '(なし)'}`,
+    '',
+    '出力は以下のキーを持つJSONオブジェクト1つのみとし、説明文やコードブロック記法は付けないこと:',
+    '{',
+    '  "negotiation_strategy": "交渉の進め方の方針（提示タイミング、段階的提示か一括提示か等）",',
+    '  "key_talking_points": ["伝えるべきポイント"],',
+    '  "anticipated_objections": [ { "objection": "想定される反論・懸念", "response": "回答案" } ],',
+    '  "concession_options": ["代替案・譲歩案（分割値上げ、適用時期の調整、ロット条件見直し等）"],',
+    '  "opening_offer_comment": "初回提示の仕方についてのコメント",',
+    '  "relationship_risk": "関係悪化リスクの評価とその理由（情報不足なら「情報不足」）",',
+    '  "letter_draft": "値上げ案内文のドラフト（丁寧なビジネス文書形式。宛名・時候の挨拶・結語を含む。顧客名や金額は入力値をそのまま使用し、創作しない）"',
+    '}',
+  ].join('\n');
+
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.35 },
+  };
+
+  const res = UrlFetchApp.fetch(url, {
+    method: 'post', contentType: 'application/json',
+    payload: JSON.stringify(payload), muteHttpExceptions: true,
+  });
+
+  const code = res.getResponseCode();
+  const body = res.getContentText();
+  if (code !== 200) {
+    logError('Gemini APIエラー（価格交渉AI）', { message: `HTTP ${code}: ${body.substring(0, 500)}` });
+    throw new Error(`価格交渉AIでエラーが発生しました（HTTP ${code}）。APIキーや利用枠をご確認ください。`);
+  }
+
+  let json;
+  try { json = JSON.parse(body); } catch (e) { throw new Error('Gemini応答の解析に失敗しました。'); }
+  const candidate = json.candidates && json.candidates[0];
+  const text = candidate && candidate.content && candidate.content.parts && candidate.content.parts[0] && candidate.content.parts[0].text;
+  if (!text) throw new Error('AIから有効な応答が得られませんでした。');
+
+  let extracted;
+  try { extracted = JSON.parse(text); } catch (e) { throw new Error('AI出力のJSON解析に失敗しました: ' + e.message); }
+
+  return {
+    negotiation_strategy: extracted.negotiation_strategy || '',
+    key_talking_points: Array.isArray(extracted.key_talking_points) ? extracted.key_talking_points : [],
+    anticipated_objections: Array.isArray(extracted.anticipated_objections) ? extracted.anticipated_objections : [],
+    concession_options: Array.isArray(extracted.concession_options) ? extracted.concession_options : [],
+    opening_offer_comment: extracted.opening_offer_comment || '',
+    relationship_risk: extracted.relationship_risk || '',
+    letter_draft: extracted.letter_draft || '',
+  };
+}

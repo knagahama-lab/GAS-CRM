@@ -128,6 +128,14 @@ function _dispatchAction(action, data) {
     case 'importDealsCsv':      return importDealsCsv(data.csvText);
     case 'importActivitiesCsv': return importActivitiesCsv(data.csvText);
 
+    // ── 価格改定（値上げ）交渉支援AI ──────────────────────────
+    case 'generatePriceNegotiation':     return generatePriceNegotiation(data);
+    case 'regenerateNegotiationStrategy':return regenerateNegotiationStrategy(data.negotiation_id);
+    case 'getAllNegotiations':           return getAllNegotiations(userEmail);
+    case 'getNegotiationsByCustomer':    return getNegotiationsByCustomer(data.customer_id);
+    case 'updateNegotiationStatus':      return updateNegotiationStatus(data);
+    case 'deleteNegotiation':            return deleteNegotiation(data.negotiation_id);
+
     // ── メール ────────────────────────────────
     case 'sendEmail':         return sendEmail(data);
     case 'getEmailHistory':   return getEmailHistory(data.customer_id);
@@ -170,6 +178,7 @@ function _getInitData(userEmail) {
   ensureMeetingsSetup();      // 議事録AI機能を追加する前に構築済みのシートへの自動マイグレーション
   ensureInsightReviewSetup(); // 顧客分析AI・PDCAレビュー機能を追加する前に構築済みのシートへの自動マイグレーション
   ensureAnalyticsSetup();     // 分析ラボ機能を追加する前に構築済みのシートへの自動マイグレーション
+  ensurePriceNegotiationSetup(); // 価格交渉AI機能を追加する前に構築済みのシートへの自動マイグレーション
   const user = getCurrentUser();
   const settings = getAllSettings();
   const kpi = JSON.parse(getKpiSummary());

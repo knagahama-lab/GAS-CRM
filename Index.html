@@ -260,6 +260,7 @@ textarea.form-control { min-height: 80px; resize: vertical; }
     <button class="nav-item" id="nav-meetings" onclick="navigate('meetings')"><span class="icon">🎙️</span>議事録AI</button>
     <button class="nav-item" id="nav-pdca" onclick="navigate('pdca')"><span class="icon">📈</span>PDCAレビュー</button>
     <button class="nav-item" id="nav-analytics" onclick="navigate('analytics')"><span class="icon">🔬</span>分析ラボ</button>
+    <button class="nav-item" id="nav-pricenego" onclick="navigate('pricenego')"><span class="icon">💹</span>価格交渉AI</button>
   </div>
   <div class="nav-section" id="nav-admin-section" style="display:none">
     <div class="nav-label">管理</div>
@@ -293,6 +294,7 @@ const state = {
   deals: [],
   activities: [],
   meetings: [],
+  negotiations: [],
 };
 
 // ── 初期化 ────────────────────────────────────────────────
@@ -316,6 +318,7 @@ window.onload = async () => {
     if (!boolSetting(s, 'FEATURE_MEETINGS')) hide('nav-meetings');
     if (!boolSetting(s, 'FEATURE_PDCA'))     hide('nav-pdca');
     if (!boolSetting(s, 'FEATURE_ANALYTICS'))hide('nav-analytics');
+    if (!boolSetting(s, 'FEATURE_PRICE_NEGOTIATION')) hide('nav-pricenego');
 
     navigate('dashboard');
   } catch(e) {
@@ -344,7 +347,7 @@ function navigate(page) {
   document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
   const navEl = document.getElementById('nav-' + page);
   if (navEl) navEl.classList.add('active');
-  const titles = { dashboard:'ダッシュボード', customers:'顧客管理', deals:'商談管理', kanban:'カンバンボード', activities:'活動ログ', meetings:'議事録AI', pdca:'PDCAレビュー', analytics:'分析ラボ', admin:'管理画面' };
+  const titles = { dashboard:'ダッシュボード', customers:'顧客管理', deals:'商談管理', kanban:'カンバンボード', activities:'活動ログ', meetings:'議事録AI', pdca:'PDCAレビュー', analytics:'分析ラボ', pricenego:'価格交渉AI', admin:'管理画面' };
   document.getElementById('page-title').textContent = titles[page] || page;
   closeSidebar();
 
@@ -357,6 +360,7 @@ function navigate(page) {
     case 'meetings':   renderMeetings(); break;
     case 'pdca':       renderPdca(); break;
     case 'analytics':  renderAnalytics(); break;
+    case 'pricenego':  renderPriceNego(); break;
     case 'admin':
       google.script.run
         .withSuccessHandler(function(url) { window.open(url + '?page=admin', '_top'); })
@@ -1459,6 +1463,212 @@ async function askAiAssistantUi() {
     }).join('')}</div>`;
   }
   if (target) target.outerHTML = `<div style="font-size:12.5px;line-height:1.7;white-space:pre-wrap">${esc(res.answer)}</div>${tableHtml}`;
+}
+
+// ── 価格交渉AI（値上げ交渉支援） ──────────────────────────────
+const negoStatusMeta = {
+  DRAFT:       { label: '下書き', bg: '#F3F4F6', fg: '#374151' },
+  PROPOSED:    { label: '提示済み', bg: '#DBEAFE', fg: '#1E40AF' },
+  NEGOTIATING: { label: '交渉中', bg: '#FEF3C7', fg: '#92400E' },
+  AGREED:      { label: '合意', bg: '#D1FAE5', fg: '#065F46' },
+  REJECTED:    { label: '不成立', bg: '#FEE2E2', fg: '#991B1B' },
+};
+function negoBadge(status) {
+  const m = negoStatusMeta[status] || negoStatusMeta.DRAFT;
+  return `<span class="badge" style="background:${m.bg};color:${m.fg}">${m.label}</span>`;
+}
+
+async function renderPriceNego() {
+  setContent(skeletonTable(6));
+  if (!state.customers || !state.customers.length) {
+    state.customers = await call('getAllCustomers') || [];
+  }
+  const data = await call('getAllNegotiations');
+  state.negotiations = data || [];
+
+  const rows = state.negotiations.length ? state.negotiations.map((n, i) => `
+    <tr style="cursor:pointer" onclick="openNegotiation(${i})">
+      <td><strong>${esc(_custName(n.customer_id))}</strong></td>
+      <td>${esc(n.item_name)}</td>
+      <td>¥${Number(n.current_price||0).toLocaleString()} → ¥${Number(n.target_price||0).toLocaleString()}<div style="font-size:11px;color:var(--gray)">上昇率 ${n.increase_rate!==''?n.increase_rate+'%':'—'}</div></td>
+      <td>${negoBadge(n.status)}</td>
+      <td>${fmtDate(n.updated_at)}</td>
+      <td class="td-actions" onclick="event.stopPropagation()"><button class="btn btn-outline btn-sm" onclick="removeNegotiation('${n.negotiation_id}')">削除</button></td>
+    </tr>`).join('')
+    : `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">💹</div><div class="empty-title">価格交渉シナリオがまだありません</div><div class="empty-desc">値上げ交渉を行う顧客・品目を選んで作成してください</div></div></td></tr>`;
+
+  setContent(`
+    <div style="display:flex;justify-content:flex-end;margin-bottom:14px">
+      <button class="btn btn-primary" onclick="showCreateNegotiationModal()">＋ 新規交渉シナリオ作成</button>
+    </div>
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">💹 価格交渉一覧</div>
+        <span style="font-size:12px;color:var(--gray)">${state.negotiations.length} 件</span>
+      </div>
+      <div class="card-body"><table><thead><tr><th>顧客</th><th>対象品目</th><th>現行→希望価格</th><th>状態</th><th>更新日</th><th>操作</th></tr></thead>
+      <tbody>${rows}</tbody></table></div>
+    </div>`);
+}
+
+function _custName(customerId) {
+  const c = (state.customers||[]).find(c => c.customer_id === customerId);
+  return c ? c.company_name : customerId;
+}
+
+async function removeNegotiation(negotiationId) {
+  if (!confirm('この交渉シナリオを削除しますか？')) return;
+  const res = await call('deleteNegotiation', { negotiation_id: negotiationId });
+  if (!res) return;
+  showSuccess('削除しました');
+  renderPriceNego();
+}
+
+async function showCreateNegotiationModal() {
+  const reasons = await call('getMasterData', { category: 'PRICE_REASON' });
+  const reasonOpts = (reasons||[]).map(r => `<option value="${r.code}">${esc(r.label)}</option>`).join('');
+  const customerOpts = state.customers.map(c => `<option value="${c.customer_id}">${esc(c.company_name)}</option>`).join('');
+
+  showModal('💹 価格交渉シナリオ作成', `
+    <div class="form-group"><label class="form-label">顧客<span class="required">*</span></label>
+      <select class="form-control" id="neg-customer" onchange="onNegoCustomerChange()">
+        <option value="">— 選択してください —</option>${customerOpts}
+      </select></div>
+    <div class="form-group"><label class="form-label">関連する商談（任意）</label>
+      <select class="form-control" id="neg-deal"><option value="">なし</option></select></div>
+    <div class="form-group"><label class="form-label">対象製品・品目<span class="required">*</span></label>
+      <input class="form-control" id="neg-item" placeholder="例: AG6R共通ボード 基板実装"></div>
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">現行価格（円）</label><input class="form-control" id="neg-current" type="number" placeholder="1000"></div>
+      <div class="form-group"><label class="form-label">希望改定後価格（円）</label><input class="form-control" id="neg-target" type="number" placeholder="1100"></div>
+    </div>
+    <div class="form-group"><label class="form-label">値上げ理由区分</label>
+      <select class="form-control" id="neg-reason-cat">${reasonOpts}</select></div>
+    <div class="form-group"><label class="form-label">値上げ理由の詳細</label>
+      <textarea class="form-control" id="neg-reason-detail" rows="3" placeholder="例: 2026年の銅・樹脂価格高騰により実装コストが上昇したため"></textarea></div>`,
+  async () => {
+    const custId = val('neg-customer');
+    const itemName = val('neg-item');
+    if (!custId) return showError('顧客を選択してください');
+    if (!itemName) return showError('対象製品・品目を入力してください');
+
+    const reasonSel = document.getElementById('neg-reason-cat');
+    const reasonLabel = reasonSel?.options[reasonSel.selectedIndex]?.text || '';
+
+    closeModal();
+    showInfo('AIが交渉シナリオを作成しています…');
+    const res = await call('generatePriceNegotiation', {
+      customer_id: custId,
+      deal_id: val('neg-deal'),
+      item_name: itemName,
+      current_price: val('neg-current'),
+      target_price: val('neg-target'),
+      reason_category: val('neg-reason-cat'),
+      reason_category_label: reasonLabel,
+      reason_detail: val('neg-reason-detail'),
+    });
+    if (!res) return;
+    showSuccess('交渉シナリオを作成しました');
+    renderPriceNego();
+    showNegotiationDetailModal(res);
+  }, '作成');
+}
+
+async function onNegoCustomerChange() {
+  const custId = val('neg-customer');
+  const dealSelect = document.getElementById('neg-deal');
+  if (!custId) { dealSelect.innerHTML = `<option value="">なし</option>`; return; }
+  const deals = await call('getDealsByCustomer', { customer_id: custId });
+  dealSelect.innerHTML = `<option value="">なし</option>${(deals||[]).map(d => `<option value="${d.deal_id}">${esc(d.deal_name)}</option>`).join('')}`;
+}
+
+function openNegotiation(index) {
+  const n = (state.negotiations||[])[index];
+  if (!n) return;
+  showNegotiationDetailModal(n);
+}
+
+function showNegotiationDetailModal(n) {
+  let strategy = {};
+  try { strategy = n.strategy_json ? JSON.parse(n.strategy_json) : {}; } catch(e) {}
+
+  const objectionsHtml = (strategy.anticipated_objections||[]).length ? strategy.anticipated_objections.map(o => `
+    <div style="padding:8px 0;border-bottom:1px solid #F3F4F6">
+      <div style="font-weight:600;font-size:12.5px">❓ ${esc(o.objection||'')}</div>
+      <div style="font-size:12px;color:var(--mid);margin-top:2px">💬 ${esc(o.response||'')}</div>
+    </div>`).join('') : `<div style="font-size:12.5px;color:var(--gray)">情報不足</div>`;
+
+  const pointsHtml = (strategy.key_talking_points||[]).length
+    ? `<ul style="padding-left:18px;font-size:12.5px;line-height:1.8">${strategy.key_talking_points.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>` : `<div style="font-size:12.5px;color:var(--gray)">情報不足</div>`;
+  const concessionsHtml = (strategy.concession_options||[]).length
+    ? `<ul style="padding-left:18px;font-size:12.5px;line-height:1.8">${strategy.concession_options.map(p=>`<li>${esc(p)}</li>`).join('')}</ul>` : `<div style="font-size:12.5px;color:var(--gray)">情報不足</div>`;
+
+  showModal(`💹 ${esc(n.item_name)}（${esc(_custName(n.customer_id))}）`, `
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px;padding:14px;background:#F8FAFC;border-radius:8px">
+      <div><div style="font-size:11px;color:#6B7280;font-weight:600;text-transform:uppercase">現行価格</div><div style="margin-top:2px;font-weight:700">¥${Number(n.current_price||0).toLocaleString()}</div></div>
+      <div><div style="font-size:11px;color:#6B7280;font-weight:600;text-transform:uppercase">希望改定後価格</div><div style="margin-top:2px;font-weight:700;color:var(--primary)">¥${Number(n.target_price||0).toLocaleString()}</div></div>
+      <div><div style="font-size:11px;color:#6B7280;font-weight:600;text-transform:uppercase">上昇率</div><div style="margin-top:2px;font-weight:700">${n.increase_rate!==''?n.increase_rate+'%':'—'}</div></div>
+    </div>
+
+    <div class="form-row">
+      <div class="form-group"><label class="form-label">ステータス</label>
+        <select class="form-control" id="neg-status" onchange="onNegoStatusChange()">
+          ${Object.entries(negoStatusMeta).map(([k,v])=>`<option value="${k}" ${k===n.status?'selected':''}>${v.label}</option>`).join('')}
+        </select></div>
+      <div class="form-group" id="neg-agreed-price-group" style="display:${n.status==='AGREED'?'block':'none'}">
+        <label class="form-label">合意価格（円）</label>
+        <input class="form-control" id="neg-agreed-price" type="number" value="${esc(n.agreed_price||'')}"></div>
+    </div>
+    <div style="margin-bottom:16px"><button class="btn btn-primary btn-sm" onclick="saveNegotiationStatus('${n.negotiation_id}')">💾 ステータスを保存</button></div>
+
+    <div class="form-group"><label class="form-label">🎯 交渉戦略の方針</label>
+      <div style="padding:10px 12px;background:#EEF0FE;border-radius:8px;font-size:12.5px;line-height:1.7">${esc(strategy.negotiation_strategy||'情報不足')}</div></div>
+
+    <div class="form-group"><label class="form-label">📌 伝えるべきポイント</label>${pointsHtml}</div>
+    <div class="form-group"><label class="form-label">❓ 想定される反論と回答</label>${objectionsHtml}</div>
+    <div class="form-group"><label class="form-label">🤝 譲歩案・代替案</label>${concessionsHtml}</div>
+    <div class="form-group"><label class="form-label">⚠️ 関係悪化リスク</label>
+      <div style="padding:10px 12px;background:#FFFBEB;border-radius:8px;font-size:12.5px;line-height:1.7">${esc(strategy.relationship_risk||'情報不足')}</div></div>
+
+    <div class="form-group"><label class="form-label">✉️ 値上げ案内文ドラフト（編集・コピー可）</label>
+      <textarea class="form-control" id="neg-letter" rows="10">${esc(strategy.letter_draft||'')}</textarea>
+      <div style="margin-top:6px;display:flex;gap:8px">
+        <button class="btn btn-outline btn-sm" onclick="copyNegoLetter()">📋 コピー</button>
+        <button class="btn btn-outline btn-sm" onclick="runRegenerateNegotiation('${n.negotiation_id}')">🔄 AIで再生成</button>
+      </div>
+    </div>`, null, null);
+}
+
+function onNegoStatusChange() {
+  const status = val('neg-status');
+  document.getElementById('neg-agreed-price-group').style.display = (status === 'AGREED') ? 'block' : 'none';
+}
+
+async function saveNegotiationStatus(negotiationId) {
+  const status = val('neg-status');
+  const agreedPrice = val('neg-agreed-price');
+  const res = await call('updateNegotiationStatus', {
+    negotiation_id: negotiationId, status,
+    agreed_price: agreedPrice, agreed_date: status === 'AGREED' ? new Date().toISOString().split('T')[0] : '',
+  });
+  if (!res) return;
+  showSuccess('ステータスを更新しました');
+  closeModal();
+  renderPriceNego();
+}
+
+function copyNegoLetter() {
+  const text = document.getElementById('neg-letter').value;
+  navigator.clipboard.writeText(text).then(() => showSuccess('コピーしました')).catch(() => showError('コピーに失敗しました'));
+}
+
+async function runRegenerateNegotiation(negotiationId) {
+  showInfo('AIが再生成しています…');
+  const res = await call('regenerateNegotiationStrategy', { negotiation_id: negotiationId });
+  if (!res) return;
+  showSuccess('再生成しました');
+  renderPriceNego();
+  showNegotiationDetailModal(res);
 }
 
 // ── モーダル: 顧客追加 ────────────────────────────────────
